@@ -17,8 +17,12 @@ import {
   FileText,
   Sparkles,
   MapPin,
-  ExternalLink
+  ExternalLink,
+  Smartphone,
+  Printer
 } from 'lucide-react';
+import WhatsAppSimulatorModal from '../common/WhatsAppSimulatorModal';
+import ProformaInvoiceModal from '../common/ProformaInvoiceModal';
 
 export default function FreightEstimatorEngine({ company }) {
   const custom = company?.customMetrics || {
@@ -40,6 +44,8 @@ export default function FreightEstimatorEngine({ company }) {
   const [includeClearing, setIncludeClearing] = useState(true);
   const [currencyView, setCurrencyView] = useState('NGN'); // 'NGN' | 'USD'
   const [copied, setCopied] = useState(false);
+  const [isWhatsAppSimOpen, setIsWhatsAppSimOpen] = useState(false);
+  const [isInvoiceOpen, setIsInvoiceOpen] = useState(false);
 
   // Countdown timer simulation for next consolidation cut-off
   const [timeLeft, setTimeLeft] = useState({ days: 2, hours: 14, minutes: 27, seconds: 43 });
@@ -122,6 +128,47 @@ Generated via ${company.name} Automated Rate Portal. Please confirm space alloca
 
   const phoneTarget = company.samplePhone || '2348033045612';
   const whatsappUrl = `https://wa.me/${phoneTarget}?text=${encodeURIComponent(whatsappBookingText)}`;
+
+  const invoiceData = {
+    title: `${freightType === 'air' ? 'Air Cargo Consolidation' : 'Ocean Container Freight'} Landed Quote`,
+    subtitle: `Transit Route: ${origin} ➔ ${destination}`,
+    subtotal: freightCostNgn + handlingFeeNgn,
+    surcharges: cissNgn + etlsNgn + portLevyNgn + clearanceAdminFeeNgn,
+    vat: vatNgn,
+    total: totalLandedCostNgn,
+    items: [
+      {
+        name: `${freightType === 'air' ? 'Air Freight Cargo Space Allocation' : 'Ocean Container Freight Transit'}`,
+        desc: `${selectedCat.name} (${freightType === 'air' ? `${weightKg} KG` : `${volumeCbm} CBM`}) from ${origin.split(' ')[0]} to Lagos`,
+        qty: freightType === 'air' ? `${weightKg} KG` : `${volumeCbm} CBM`,
+        rate: freightType === 'air' ? (custom.airRateUsd * selectedCat.airFactor * exchangeRate) : (custom.seaRateUsd * selectedCat.seaFactor * exchangeRate),
+        total: freightCostNgn
+      },
+      {
+        name: 'Lagos Terminal Handling & Port Dues',
+        desc: 'Ground handling, sorting, physical transfer and security scanning',
+        qty: '1 Consignment',
+        rate: handlingFeeNgn,
+        total: handlingFeeNgn
+      },
+      ...(includeClearing ? [
+        {
+          name: `Customs Statutory Import Duty (${dutyBracket * 100}%)`,
+          desc: `Calculated on commercial invoice CIF value ($${invoiceValueUsd.toLocaleString()})`,
+          qty: 'Statutory Tariff',
+          rate: customsDutyNgn,
+          total: customsDutyNgn
+        },
+        {
+          name: 'Nigeria Customs Port Surcharges & PAAR Processing',
+          desc: '1% CISS, 0.5% ETLS, 7% Port Development Surcharge, PAAR documentation',
+          qty: 'Statutory Fees',
+          rate: cissNgn + etlsNgn + portLevyNgn + clearanceAdminFeeNgn,
+          total: cissNgn + etlsNgn + portLevyNgn + clearanceAdminFeeNgn
+        }
+      ] : [])
+    ]
+  };
 
   return (
     <div className="w-full max-w-7xl mx-auto space-y-6">
@@ -575,7 +622,7 @@ Generated via ${company.name} Automated Rate Portal. Please confirm space alloca
                 </p>
               </div>
 
-              {/* WhatsApp Direct Actions */}
+              {/* WhatsApp & Proforma Actions */}
               <div className="space-y-2 pt-2">
                 <a
                   href={whatsappUrl}
@@ -588,10 +635,30 @@ Generated via ${company.name} Automated Rate Portal. Please confirm space alloca
                   <ExternalLink className="w-3.5 h-3.5 opacity-70 ml-1" />
                 </a>
 
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsWhatsAppSimOpen(true)}
+                    className="bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-semibold py-2.5 px-3 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-center gap-1.5 transition-colors shadow-sm"
+                  >
+                    <Smartphone className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                    <span>Test in Simulator</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setIsInvoiceOpen(true)}
+                    className="bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-semibold py-2.5 px-3 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-center gap-1.5 transition-colors shadow-sm"
+                  >
+                    <Printer className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                    <span>Proforma PDF</span>
+                  </button>
+                </div>
+
                 <button
                   type="button"
                   onClick={handleCopy}
-                  className="w-full bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-mono text-xs py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 border border-slate-200 dark:border-slate-700 transition-colors shadow-sm"
+                  className="w-full bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400 font-mono text-xs py-2 px-4 rounded-xl flex items-center justify-center gap-2 border border-slate-200 dark:border-slate-800 transition-colors"
                 >
                   {copied ? (
                     <>
@@ -600,8 +667,8 @@ Generated via ${company.name} Automated Rate Portal. Please confirm space alloca
                     </>
                   ) : (
                     <>
-                      <Copy className="w-4 h-4 text-slate-500 dark:text-slate-400" />
-                      <span>Copy WhatsApp Booking Card</span>
+                      <Copy className="w-4 h-4 text-slate-400" />
+                      <span>Copy Raw WhatsApp Payload</span>
                     </>
                   )}
                 </button>
@@ -621,6 +688,23 @@ Generated via ${company.name} Automated Rate Portal. Please confirm space alloca
         </div>
 
       </div>
+
+      {/* WhatsApp Simulator Modal */}
+      <WhatsAppSimulatorModal
+        isOpen={isWhatsAppSimOpen}
+        onClose={() => setIsWhatsAppSimOpen(false)}
+        company={company}
+        payloadText={whatsappBookingText}
+        onOpenInvoice={() => setIsInvoiceOpen(true)}
+      />
+
+      {/* Official Proforma Invoice Modal */}
+      <ProformaInvoiceModal
+        isOpen={isInvoiceOpen}
+        onClose={() => setIsInvoiceOpen(false)}
+        company={company}
+        invoiceData={invoiceData}
+      />
     </div>
   );
 }

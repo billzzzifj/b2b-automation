@@ -14,8 +14,12 @@ import {
   HelpCircle,
   ShieldCheck,
   MapPin,
-  FileCode
+  FileCode,
+  Smartphone,
+  Printer
 } from 'lucide-react';
+import WhatsAppSimulatorModal from '../common/WhatsAppSimulatorModal';
+import ProformaInvoiceModal from '../common/ProformaInvoiceModal';
 
 export default function PackagingVolumeEngine({ company }) {
   const custom = company?.customMetrics || {
@@ -35,6 +39,8 @@ export default function PackagingVolumeEngine({ company }) {
   const [uploadedFileName, setUploadedFileName] = useState('');
   const [sampleKitOrdered, setSampleKitOrdered] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [isWhatsAppSimOpen, setIsWhatsAppSimOpen] = useState(false);
+  const [isInvoiceOpen, setIsInvoiceOpen] = useState(false);
 
   // Packaging Catalog Specs
   const packagingCatalog = {
@@ -178,6 +184,40 @@ Generated via ${company.name} Automated Packaging Volume Engine. Requesting prin
 
   const phoneTarget = company.samplePhone || '2348034455667';
   const whatsappUrl = `https://wa.me/${phoneTarget}?text=${encodeURIComponent(whatsappPackagingText)}`;
+
+  const invoiceData = {
+    title: `${currentPkg.name} Commercial Print Run`,
+    subtitle: `Volume: ${quantity.toLocaleString()} Pcs • ${gsmStock} GSM • ${selectedFinishes.map(f => finishCatalog[f].name).join(', ')}`,
+    subtotal: totalProductionNgn,
+    surcharges: currentPkg.plateFee + (sampleKitOrdered ? (custom.sampleKitNgn || 15000) : 0),
+    vat: Math.round(totalOrderNgn * 0.075),
+    total: totalOrderNgn + (sampleKitOrdered ? (custom.sampleKitNgn || 15000) : 0) + Math.round(totalOrderNgn * 0.075),
+    items: [
+      {
+        name: `Core Production: ${currentPkg.name}`,
+        desc: `${quantity.toLocaleString()} units on ${gsmStock} GSM stock with ${selectedFinishes.map(f => finishCatalog[f].name).join(', ')}`,
+        qty: `${quantity.toLocaleString()} Pcs`,
+        rate: finalUnitPriceNgn,
+        total: totalProductionNgn
+      },
+      {
+        name: 'CTP Aluminum Plates & Die-Cut Tooling',
+        desc: 'High-resolution computerized thermal offset plates and custom steel-rule die',
+        qty: 'Tooling Setup',
+        rate: currentPkg.plateFee,
+        total: currentPkg.plateFee
+      },
+      ...(sampleKitOrdered ? [
+        {
+          name: 'Pre-Production Physical Proof Swatch Pack',
+          desc: 'Digital hardcopy color-matched proof (100% credited against bulk run invoice)',
+          qty: '1 Kit',
+          rate: custom.sampleKitNgn || 15000,
+          total: custom.sampleKitNgn || 15000
+        }
+      ] : [])
+    ]
+  };
 
   return (
     <div className="w-full max-w-7xl mx-auto space-y-6">
@@ -517,6 +557,26 @@ Generated via ${company.name} Automated Packaging Volume Engine. Requesting prin
                   <ExternalLink className="w-3.5 h-3.5 opacity-70 ml-1" />
                 </a>
 
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsWhatsAppSimOpen(true)}
+                    className="bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-semibold py-2.5 px-3 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-center gap-1.5 transition-colors shadow-sm"
+                  >
+                    <Smartphone className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                    <span>WhatsApp Simulator</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setIsInvoiceOpen(true)}
+                    className="bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-semibold py-2.5 px-3 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-center gap-1.5 transition-colors shadow-sm"
+                  >
+                    <Printer className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                    <span>Proforma PDF</span>
+                  </button>
+                </div>
+
                 <button
                   type="button"
                   onClick={handleCopy}
@@ -550,6 +610,23 @@ Generated via ${company.name} Automated Packaging Volume Engine. Requesting prin
         </div>
 
       </div>
+
+      {/* WhatsApp Simulator Modal */}
+      <WhatsAppSimulatorModal
+        isOpen={isWhatsAppSimOpen}
+        onClose={() => setIsWhatsAppSimOpen(false)}
+        company={company}
+        payloadText={whatsappPackagingText}
+        onOpenInvoice={() => setIsInvoiceOpen(true)}
+      />
+
+      {/* Official Proforma Invoice Modal */}
+      <ProformaInvoiceModal
+        isOpen={isInvoiceOpen}
+        onClose={() => setIsInvoiceOpen(false)}
+        company={company}
+        invoiceData={invoiceData}
+      />
     </div>
   );
 }

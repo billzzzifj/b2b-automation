@@ -15,8 +15,12 @@ import {
   TrendingDown, 
   ShieldAlert, 
   Compass,
-  MapPin
+  MapPin,
+  Smartphone,
+  Printer
 } from 'lucide-react';
+import WhatsAppSimulatorModal from '../common/WhatsAppSimulatorModal';
+import ProformaInvoiceModal from '../common/ProformaInvoiceModal';
 
 export default function BespokeJoineryConfigurator({ company }) {
   const custom = company?.customMetrics || {
@@ -37,6 +41,8 @@ export default function BespokeJoineryConfigurator({ company }) {
   const [haulageZone, setHaulageZone] = useState('island'); // 'island' | 'mainland' | 'outskirts'
   const [valueEngineeringActive, setValueEngineeringActive] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [isWhatsAppSimOpen, setIsWhatsAppSimOpen] = useState(false);
+  const [isInvoiceOpen, setIsInvoiceOpen] = useState(false);
 
   // Project Type Presets
   const projectCatalog = {
@@ -203,6 +209,52 @@ Generated via ${company.name} Bespoke Joinery Configurator. Requesting factory c
 
   const phoneTarget = company.samplePhone || '2348021122334';
   const whatsappUrl = `https://wa.me/${phoneTarget}?text=${encodeURIComponent(whatsappBoqText)}`;
+
+  const invoiceData = {
+    title: `${selectedProject.name} Specification & BOQ`,
+    subtitle: `Substrate: ${currentSubstrate.name} • Hardware: ${effectiveHardwareTier.toUpperCase()}`,
+    subtotal: substrateMaterialsCost + totalHardwareCost + joineryLaborCost + edgeBandingCost,
+    surcharges: zoneInfo.cost + zoneInfo.hoistingCharge,
+    vat: Math.round(totalProductionCostNgn * 0.075),
+    total: totalProductionCostNgn + Math.round(totalProductionCostNgn * 0.075),
+    items: [
+      {
+        name: `Core Millwork Substrate Panels (${currentSubstrate.name})`,
+        desc: `${grossBoardsWithWaste} Panels (incl. 15% fabrication wastage factor) for ${linearMeters}m run`,
+        qty: `${grossBoardsWithWaste} Boards`,
+        rate: boardCostPerUnit * currentSubstrate.mult,
+        total: substrateMaterialsCost
+      },
+      {
+        name: `Precision Damped Motion Hardware (${effectiveHardwareTier.toUpperCase()})`,
+        desc: `${selectedProject.hardwareUnits} Pairs/Units (Hinges, Tandembox runners & lifts)`,
+        qty: `${selectedProject.hardwareUnits} Units`,
+        rate: Math.round(totalHardwareCost / selectedProject.hardwareUnits),
+        total: totalHardwareCost
+      },
+      {
+        name: 'Workshop CNC Milling, Joinery & Bench Labor',
+        desc: 'Precision computerized slicing, joinery mortising and sub-assembly',
+        qty: `${linearMeters} Meters`,
+        rate: Math.round(joineryLaborCost / linearMeters),
+        total: joineryLaborCost
+      },
+      {
+        name: 'ABS Impact Edge-Banding & Adhesive Sealing',
+        desc: `${edgeBandingMeters} Meters of 2.0mm high-durability moisture-sealed ABS edging`,
+        qty: `${edgeBandingMeters} Meters`,
+        rate: 1200,
+        total: edgeBandingCost
+      },
+      {
+        name: 'Lagos Haulage, Delivery & Site Hoisting',
+        desc: `${zoneInfo.name} with site rigging and delivery insurance`,
+        qty: 'Turnkey Logistics',
+        rate: zoneInfo.cost + zoneInfo.hoistingCharge,
+        total: zoneInfo.cost + zoneInfo.hoistingCharge
+      }
+    ]
+  };
 
   return (
     <div className="w-full max-w-7xl mx-auto space-y-6">
@@ -558,10 +610,30 @@ Generated via ${company.name} Bespoke Joinery Configurator. Requesting factory c
                   <ExternalLink className="w-3.5 h-3.5 opacity-70 ml-1" />
                 </a>
 
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsWhatsAppSimOpen(true)}
+                    className="bg-stone-100 hover:bg-stone-200 dark:bg-stone-900 dark:hover:bg-stone-800 text-stone-800 dark:text-stone-200 text-xs font-semibold py-2.5 px-3 rounded-xl border border-stone-200 dark:border-stone-700 flex items-center justify-center gap-1.5 transition-colors shadow-sm"
+                  >
+                    <Smartphone className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                    <span>WhatsApp Simulator</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setIsInvoiceOpen(true)}
+                    className="bg-stone-100 hover:bg-stone-200 dark:bg-stone-900 dark:hover:bg-stone-800 text-stone-800 dark:text-stone-200 text-xs font-semibold py-2.5 px-3 rounded-xl border border-stone-200 dark:border-stone-700 flex items-center justify-center gap-1.5 transition-colors shadow-sm"
+                  >
+                    <Printer className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                    <span>Official BOQ PDF</span>
+                  </button>
+                </div>
+
                 <button
                   type="button"
                   onClick={handleCopy}
-                  className="w-full bg-stone-100 hover:bg-stone-200 dark:bg-stone-900 dark:hover:bg-stone-800 text-stone-700 dark:text-stone-200 font-mono text-xs py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 border border-stone-200 dark:border-stone-700 transition-colors shadow-sm"
+                  className="w-full bg-stone-50 hover:bg-stone-100 dark:bg-stone-950 dark:hover:bg-stone-900 text-stone-600 dark:text-stone-400 font-mono text-xs py-2 px-4 rounded-xl flex items-center justify-center gap-2 border border-stone-200 dark:border-stone-800 transition-colors"
                 >
                   {copied ? (
                     <>
@@ -570,7 +642,7 @@ Generated via ${company.name} Bespoke Joinery Configurator. Requesting factory c
                     </>
                   ) : (
                     <>
-                      <Copy className="w-4 h-4 text-stone-500 dark:text-stone-400" />
+                      <Copy className="w-4 h-4 text-stone-400" />
                       <span>Copy Full Specifier BOQ</span>
                     </>
                   )}
@@ -591,6 +663,23 @@ Generated via ${company.name} Bespoke Joinery Configurator. Requesting factory c
         </div>
 
       </div>
+
+      {/* WhatsApp Simulator Modal */}
+      <WhatsAppSimulatorModal
+        isOpen={isWhatsAppSimOpen}
+        onClose={() => setIsWhatsAppSimOpen(false)}
+        company={company}
+        payloadText={whatsappBoqText}
+        onOpenInvoice={() => setIsInvoiceOpen(true)}
+      />
+
+      {/* Official Proforma Invoice Modal */}
+      <ProformaInvoiceModal
+        isOpen={isInvoiceOpen}
+        onClose={() => setIsInvoiceOpen(false)}
+        company={company}
+        invoiceData={invoiceData}
+      />
     </div>
   );
 }
