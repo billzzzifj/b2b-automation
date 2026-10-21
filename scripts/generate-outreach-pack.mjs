@@ -41,7 +41,7 @@ function csvEscape(val) {
 // Helper to generate full personalized scripts for a target
 function generateScriptPack(c) {
   const persona = c.targetPersona || 'Managing Director';
-  const demoUrl = `http://localhost:3000/demo/${c.slug}`;
+  const demoUrl = `https://b2b-automation.vercel.app/#/demo/${c.slug}`;
 
   // WhatsApp
   const whatsappMsg = `Hello team ${c.name},

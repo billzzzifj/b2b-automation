@@ -37,42 +37,56 @@ export default function App() {
   // Clean / Loom Mode (hides agency chrome for recording 90-second screen share)
   const [loomCleanMode, setLoomCleanMode] = useState(false);
 
-  // Initialize and synchronize with window.location pathname / hash
+  // Initialize and synchronize with window.location hash (Hash Routing)
   useEffect(() => {
     const handleUrlChange = () => {
-      const path = window.location.pathname;
-      const hash = window.location.hash;
+      const hash = window.location.hash || '';
+      const path = window.location.pathname || '';
 
-      if (path.startsWith('/demo/')) {
+      // Primary client-side hash routing: #/demo/[slug]
+      if (hash.startsWith('#/demo/')) {
+        const slug = hash.replace('#/demo/', '').replace(/\/$/, '');
+        const found = getCompanyBySlug(slug);
+        setSelectedCompany(found);
+        setCurrentView('demo');
+      } else if (hash.startsWith('#/outreach/')) {
+        const slug = hash.replace('#/outreach/', '').replace(/\/$/, '');
+        const found = getCompanyBySlug(slug);
+        setSelectedCompany(found);
+        setCurrentView('command');
+      } else if (path.startsWith('/demo/')) {
+        // Fallback for direct browser path entry: migrate cleanly to hash routing
         const slug = path.replace('/demo/', '').replace(/\/$/, '');
         const found = getCompanyBySlug(slug);
         setSelectedCompany(found);
         setCurrentView('demo');
-      } else if (hash.startsWith('#/demo/')) {
-        const slug = hash.replace('#/demo/', '');
-        const found = getCompanyBySlug(slug);
-        setSelectedCompany(found);
-        setCurrentView('demo');
+        window.history.replaceState(null, '', `/#/demo/${slug}`);
+      } else if (hash === '' || hash === '#' || hash === '#/') {
+        setCurrentView('command');
       }
     };
 
     handleUrlChange();
+    window.addEventListener('hashchange', handleUrlChange);
     window.addEventListener('popstate', handleUrlChange);
-    return () => window.removeEventListener('popstate', handleUrlChange);
+    return () => {
+      window.removeEventListener('hashchange', handleUrlChange);
+      window.removeEventListener('popstate', handleUrlChange);
+    };
   }, []);
 
-  // Switch to demo view for a specific company
+  // Switch to demo view for a specific company using Hash Routing
   const handleSelectDemoCompany = (company) => {
     setSelectedCompany(company);
     setCurrentView('demo');
-    window.history.pushState(null, '', `/demo/${company.slug}`);
+    window.location.hash = `#/demo/${company.slug}`;
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // Switch back to command center
+  // Switch back to command center using Hash Routing
   const handleBackToCommandCenter = () => {
     setCurrentView('command');
-    window.history.pushState(null, '', '/');
+    window.location.hash = '#/';
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
