@@ -135,5 +135,4 @@ npm run build
 
 ---
 
-## 📄 License
-MIT License. Built inside Google Antigravity.
+
