@@ -1333,8 +1333,14 @@ export const SECTORS = {
   }
 };
 
+export function findCompanyBySlug(slug) {
+  if (!slug) return null;
+  const clean = String(slug).trim().toLowerCase();
+  return LAGOS_TARGETS_50.find(c => c.slug.toLowerCase() === clean) || null;
+}
+
 export function getCompanyBySlug(slug) {
-  return LAGOS_TARGETS_50.find(c => c.slug === slug) || LAGOS_TARGETS_50[0];
+  return findCompanyBySlug(slug) || LAGOS_TARGETS_50[0];
 }
 
 export function getCompaniesBySector(sector) {

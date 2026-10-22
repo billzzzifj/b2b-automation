@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Truck, 
   Wrench, 
@@ -19,10 +19,12 @@ import {
   Unlock,
   ChevronRight,
   Smartphone,
-  Printer
+  Printer,
+  Link2
 } from 'lucide-react';
 import WhatsAppSimulatorModal from '../common/WhatsAppSimulatorModal';
 import ProformaInvoiceModal from '../common/ProformaInvoiceModal';
+import { getHashParams, updateHashParams, buildShareUrl } from '../../utils/urlState';
 
 export default function HeavyEquipmentRFQPortal({ company }) {
   const custom = company?.customMetrics || {
@@ -36,18 +38,6 @@ export default function HeavyEquipmentRFQPortal({ company }) {
     weeklyDiscount: 0.10,
     monthlyDiscount: 0.22
   };
-
-  // State
-  const [selectedCategory, setSelectedCategory] = useState('crane'); // 'crane' | 'excavator' | 'generator' | 'trailer' | 'staging'
-  const [leaseType, setLeaseType] = useState('wet'); // 'wet' | 'dry'
-  const [durationDays, setDurationDays] = useState(7);
-  const [mobilizationZone, setMobilizationZone] = useState('island'); // 'mainland' | 'island' | 'refinery' | 'offshore'
-  const [rcNumber, setRcNumber] = useState('');
-  const [procurementEmail, setProcurementEmail] = useState('');
-  const [specSheetUnlocked, setSpecSheetUnlocked] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [isWhatsAppSimOpen, setIsWhatsAppSimOpen] = useState(false);
-  const [isInvoiceOpen, setIsInvoiceOpen] = useState(false);
 
   // Fleet Catalog
   const fleetCatalog = {
@@ -119,39 +109,66 @@ export default function HeavyEquipmentRFQPortal({ company }) {
       escortRequired: true
     },
     offshore: {
-      name: 'Offshore Shallow-Water Barge / Escravos / Niger Delta Riverine',
+      name: 'Deepwater & Escravos Offshore Terminal Staging',
       cost: 950000,
       lowbedTrips: 2,
       escortRequired: true
     }
   };
 
-  const selectedMachine = fleetCatalog[selectedCategory];
-  const selectedZone = mobilizationZones[mobilizationZone];
+  // Read initial configuration from URL params
+  const initialParams = getHashParams();
 
-  // Duration discounts
+  // State
+  const [selectedCategory, setSelectedCategory] = useState(
+    initialParams.cat && fleetCatalog[initialParams.cat] ? initialParams.cat : 'crane'
+  );
+  const [leaseType, setLeaseType] = useState(
+    initialParams.lease === 'dry' ? 'dry' : 'wet'
+  );
+  const [durationDays, setDurationDays] = useState(
+    initialParams.days ? Math.max(1, Math.min(90, Number(initialParams.days))) : 7
+  );
+  const [mobilizationZone, setMobilizationZone] = useState(
+    initialParams.zone && mobilizationZones[initialParams.zone] ? initialParams.zone : 'island'
+  );
+  const [rcNumber, setRcNumber] = useState('');
+  const [procurementEmail, setProcurementEmail] = useState('');
+  const [specSheetUnlocked, setSpecSheetUnlocked] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
+  const [isWhatsAppSimOpen, setIsWhatsAppSimOpen] = useState(false);
+  const [isInvoiceOpen, setIsInvoiceOpen] = useState(false);
+
+  // Sync state to URL hash query parameters on change
+  useEffect(() => {
+    updateHashParams({
+      cat: selectedCategory,
+      lease: leaseType,
+      days: durationDays,
+      zone: mobilizationZone
+    }, company?.slug);
+  }, [selectedCategory, leaseType, durationDays, mobilizationZone, company?.slug]);
+
+  const selectedMachine = fleetCatalog[selectedCategory] || fleetCatalog.crane;
+  const selectedZone = mobilizationZones[mobilizationZone] || mobilizationZones.island;
+
+  // Rate Multipliers
+  const wetLeaseMultiplier = leaseType === 'wet' ? (custom.wetLeaseFuelMultiplier || 1.38) : 1.0;
+  const baseDayRate = selectedMachine.dailyRate * wetLeaseMultiplier;
+
+  // Duration Discounts
   let durationDiscountPct = 0;
   if (durationDays >= 30) {
-    durationDiscountPct = custom.monthlyDiscount || 0.22; // 22% monthly discount
+    durationDiscountPct = custom.monthlyDiscount || 0.22;
   } else if (durationDays >= 7) {
-    durationDiscountPct = custom.weeklyDiscount || 0.10; // 10% weekly discount
+    durationDiscountPct = custom.weeklyDiscount || 0.10;
   }
 
-  // Daily rate math
-  const baseDayRate = selectedMachine.dailyRate;
-  const effectiveDayRate = leaseType === 'wet'
-    ? baseDayRate * (custom.wetLeaseFuelMultiplier || 1.38)
-    : baseDayRate;
-
-  const discountedDayRate = effectiveDayRate * (1 - durationDiscountPct);
+  const discountedDayRate = baseDayRate * (1 - durationDiscountPct);
   const totalMachineRentalNgn = discountedDayRate * durationDays;
-
-  // Mobilization logistics (Two-way mobilization and demobilization)
-  const mobilizationTotalNgn = selectedZone.cost * 1.8; // roundtrip delivery & return
-
-  // Insurance & site risk bond (3% statutory site damage waiver)
+  const mobilizationTotalNgn = selectedZone.cost * 1.8;
   const siteWaiverNgn = totalMachineRentalNgn * 0.035;
-
   const totalContractNgn = totalMachineRentalNgn + mobilizationTotalNgn + siteWaiverNgn;
 
   const formatNgn = (val) => `₦${Math.round(val).toLocaleString()}`;
@@ -189,7 +206,19 @@ Generated via ${company.name} Heavy Equipment RFQ Portal. Requesting formal prof
     setTimeout(() => setCopied(false), 2200);
   };
 
-  const phoneTarget = company.samplePhone || '2348029988776';
+  const handleCopyShareLink = () => {
+    const shareUrl = buildShareUrl(company.slug, {
+      cat: selectedCategory,
+      lease: leaseType,
+      days: durationDays,
+      zone: mobilizationZone
+    });
+    navigator.clipboard.writeText(shareUrl);
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2200);
+  };
+
+  const phoneTarget = company.samplePhone || '2348033045612';
   const whatsappUrl = `https://wa.me/${phoneTarget}?text=${encodeURIComponent(whatsappRfqText)}`;
 
   const invoiceData = {
@@ -225,146 +254,157 @@ Generated via ${company.name} Heavy Equipment RFQ Portal. Requesting formal prof
   };
 
   return (
-    <div className="w-full max-w-7xl mx-auto space-y-6">
+    <div className="w-full max-w-7xl mx-auto space-y-6 font-mono text-slate-900 dark:text-slate-100">
       
-      {/* Top Banner: Industrial Heavy Plant Terminal */}
-      <div className="bg-amber-50/70 dark:bg-[#101216] border border-amber-200 dark:border-amber-500/30 rounded-xl p-4 flex flex-col md:flex-row items-center justify-between gap-4 transition-colors duration-200 shadow-sm dark:shadow-none">
+      {/* Top Banner: Industrial Heavy Plant Terminal (Brutalist) */}
+      <div className="bg-white dark:bg-zinc-950 border-2 border-black dark:border-zinc-800 p-4 sm:p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.1)]">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-yellow-500/20 border border-yellow-500/40 flex items-center justify-center text-yellow-600 dark:text-yellow-500">
-            <Truck className="w-5 h-5" />
+          <div className="w-11 h-11 bg-black text-yellow-400 dark:bg-yellow-500 dark:text-black flex items-center justify-center font-black shrink-0">
+            <Truck className="w-6 h-6" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-mono uppercase tracking-wider text-yellow-700 dark:text-yellow-500 font-bold">Industrial Fleet Portal</span>
-              <span className="text-[10px] font-mono bg-yellow-100 text-yellow-800 dark:bg-yellow-500/20 dark:text-yellow-300 px-2 py-0.5 rounded border border-yellow-200 dark:border-yellow-500/40 font-semibold">
-                Lagos Certified Machinery
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs uppercase tracking-widest text-yellow-600 dark:text-yellow-400 font-black">
+                Industrial Fleet Portal
+              </span>
+              <span className="text-[11px] px-2 py-0.5 border font-bold uppercase bg-yellow-100 text-yellow-900 border-yellow-500 dark:bg-yellow-950 dark:text-yellow-300 dark:border-yellow-500">
+                Lagos Certified Plant
               </span>
             </div>
-            <p className="text-sm text-slate-700 dark:text-slate-300">
-              Wet/Dry lease calculator, lowbed mobilization & technical spec sheets for <strong className="text-yellow-800 dark:text-yellow-400">{company.name}</strong>.
+            <p className="text-xs text-slate-600 dark:text-zinc-400 font-sans mt-0.5">
+              Wet/Dry lease calculator, lowbed mobilization & technical load charts for <strong className="text-black dark:text-white font-mono">{company.name}</strong>.
             </p>
           </div>
         </div>
 
-        {/* Live Availability Status */}
-        <div className="flex items-center gap-2 bg-white dark:bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 text-xs font-mono shadow-sm dark:shadow-none">
-          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-          <span className="text-slate-500 dark:text-slate-400">Status:</span>
-          <span className="text-emerald-700 dark:text-emerald-400 font-bold">{selectedMachine.availability}</span>
+        {/* Action Controls: Share Link */}
+        <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+          <button
+            type="button"
+            onClick={handleCopyShareLink}
+            className="min-h-[44px] px-4 py-2 border-2 border-black dark:border-zinc-700 bg-slate-100 hover:bg-slate-200 dark:bg-zinc-900 dark:hover:bg-zinc-800 text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer"
+            title="Copy sharable URL preserving all current machinery and mobilization parameters"
+          >
+            {copiedLink ? (
+              <>
+                <Check className="w-4 h-4 text-emerald-600" />
+                <span className="text-emerald-700 dark:text-emerald-400">Link Copied!</span>
+              </>
+            ) : (
+              <>
+                <Link2 className="w-4 h-4 text-slate-600 dark:text-zinc-400" />
+                <span>Share Spec Link</span>
+              </>
+            )}
+          </button>
         </div>
       </div>
 
-      {/* Main Grid */}
+      {/* Main Grid: Responsive 12-column layout */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         
-        {/* Left Column: Fleet Selection & Configuration (7 cols) */}
-        <div className="lg:col-span-7 bg-white dark:bg-[#11141B] border border-slate-200 dark:border-slate-800 rounded-2xl p-6 space-y-6 shadow-xl dark:shadow-2xl transition-colors duration-200">
+        {/* Left Column: Equipment Customizer (7 cols) */}
+        <div className="lg:col-span-7 bg-white dark:bg-zinc-950 border-2 border-black dark:border-zinc-800 p-5 sm:p-6 space-y-6">
           
-          {/* Machine Category Matrix */}
+          {/* Step 1: Machinery Selection */}
           <div>
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-mono text-yellow-700 dark:text-yellow-500 uppercase tracking-widest font-bold">
-                01 // Select Plant Machinery
+            <div className="flex items-center justify-between mb-3 border-b border-black/10 dark:border-zinc-800 pb-2">
+              <span className="text-xs uppercase tracking-widest text-yellow-600 dark:text-yellow-400 font-black">
+                01 // Select Plant & Machinery Fleet Asset
               </span>
-              <span className="text-xs text-slate-500 dark:text-slate-400">Heavy plant categories</span>
+              <span className="text-xs text-slate-500">Fleet Availability</span>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               {Object.entries(fleetCatalog).map(([key, item]) => (
                 <button
                   key={key}
                   type="button"
                   onClick={() => setSelectedCategory(key)}
-                  className={`p-3 rounded-xl border text-left transition-all ${
+                  className={`min-h-[44px] p-3 border-2 text-left transition-all cursor-pointer ${
                     selectedCategory === key
-                      ? 'bg-yellow-50 border-yellow-500 text-slate-900 dark:bg-yellow-500/10 dark:border-yellow-500 dark:text-white shadow-sm'
-                      : 'bg-slate-50 dark:bg-slate-950/60 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-700'
+                      ? 'bg-yellow-500 text-black border-black font-bold shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]'
+                      : 'bg-slate-50 dark:bg-zinc-900 border-slate-300 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 hover:border-black dark:hover:border-zinc-600'
                   }`}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-slate-900 dark:text-slate-200">{item.name.split(' ')[0]} {item.name.split(' ')[1]}</span>
-                    {selectedCategory === key && <Check className="w-3.5 h-3.5 text-yellow-600 dark:text-yellow-400" />}
+                    <span className="text-xs font-black uppercase tracking-tight">{item.name.split('/')[0]}</span>
+                    {selectedCategory === key && <Check className="w-4 h-4 text-black shrink-0" />}
                   </div>
-                  <span className="text-[11px] font-mono text-yellow-700 dark:text-yellow-500 block mt-1 font-bold">
-                    {formatNgn(item.dailyRate)}/day
-                  </span>
-                  <p className="text-[10px] text-slate-500 line-clamp-1 mt-0.5">{item.model}</p>
+                  <span className="text-[10px] font-mono block opacity-80 mt-1">{item.model}</span>
                 </button>
               ))}
             </div>
           </div>
 
-          {/* Wet Lease vs Dry Lease Mode Switcher */}
+          {/* Step 2: Wet vs Dry Lease Switch */}
           <div>
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-mono text-yellow-700 dark:text-yellow-500 uppercase tracking-widest font-bold">
-                02 // Lease Framework (Wet vs Dry)
+            <div className="flex items-center justify-between mb-3 border-b border-black/10 dark:border-zinc-800 pb-2">
+              <span className="text-xs uppercase tracking-widest text-yellow-600 dark:text-yellow-400 font-black">
+                02 // Lease Framework Structure
               </span>
-              <span className="text-xs text-slate-500 dark:text-slate-400">Operator & fuel allocation</span>
+              <span className="text-xs text-slate-500">Fuel & Operator Options</span>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <button
                 type="button"
                 onClick={() => setLeaseType('wet')}
-                className={`p-4 rounded-xl border text-left transition-all ${
+                className={`min-h-[44px] p-3.5 border-2 text-left transition-all cursor-pointer ${
                   leaseType === 'wet'
-                    ? 'bg-yellow-50 border-yellow-500 text-slate-900 dark:bg-yellow-500/10 dark:border-yellow-500 dark:text-white shadow-sm'
-                    : 'bg-slate-50 dark:bg-slate-950/60 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-700'
+                    ? 'bg-yellow-500 text-black border-black font-bold shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]'
+                    : 'bg-slate-50 dark:bg-zinc-900 border-slate-300 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 hover:border-black dark:hover:border-zinc-600'
                 }`}
               >
                 <div className="flex items-center justify-between">
-                  <span className="text-sm font-bold text-yellow-800 dark:text-yellow-400 flex items-center gap-2">
-                    <Fuel className="w-4 h-4 text-yellow-600 dark:text-yellow-400" />
-                    Turnkey Wet Lease
-                  </span>
-                  <span className="text-[10px] font-mono bg-yellow-100 text-yellow-800 dark:bg-yellow-500/20 dark:text-yellow-300 px-1.5 py-0.5 rounded font-semibold">Recommended</span>
+                  <div className="flex items-center gap-2">
+                    <Fuel className="w-4 h-4 text-black dark:text-yellow-400" />
+                    <span className="text-xs font-black uppercase">Wet Lease Turnkey</span>
+                  </div>
+                  <span className="text-[10px] font-mono font-bold bg-black text-white px-1.5 py-0.5">Recommended</span>
                 </div>
-                <p className="text-xs text-slate-600 dark:text-slate-300 mt-2">
-                  Includes certified operator, continuous on-site diesel supply ({selectedMachine.fuelConsumptionLitresPerDay}L/day), and maintenance coverage.
+                <p className="text-[11px] opacity-80 mt-1 font-sans">
+                  Includes certified operator, diesel supply ({selectedMachine.fuelConsumptionLitresPerDay}L/day) & routine maintenance.
                 </p>
               </button>
 
               <button
                 type="button"
                 onClick={() => setLeaseType('dry')}
-                className={`p-4 rounded-xl border text-left transition-all ${
+                className={`min-h-[44px] p-3.5 border-2 text-left transition-all cursor-pointer ${
                   leaseType === 'dry'
-                    ? 'bg-yellow-50 border-yellow-500 text-slate-900 dark:bg-yellow-500/10 dark:border-yellow-500 dark:text-white shadow-sm'
-                    : 'bg-slate-50 dark:bg-slate-950/60 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-700'
+                    ? 'bg-yellow-500 text-black border-black font-bold shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]'
+                    : 'bg-slate-50 dark:bg-zinc-900 border-slate-300 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 hover:border-black dark:hover:border-zinc-600'
                 }`}
               >
                 <div className="flex items-center justify-between">
-                  <span className="text-sm font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2">
-                    <Wrench className="w-4 h-4 text-slate-500 dark:text-slate-400" />
-                    Machine Dry Lease
-                  </span>
-                  <span className="text-[10px] font-mono text-slate-500">Machine Only</span>
+                  <div className="flex items-center gap-2">
+                    <Wrench className="w-4 h-4 text-black dark:text-yellow-400" />
+                    <span className="text-xs font-black uppercase">Dry Lease (Machine Only)</span>
+                  </div>
+                  <span className="text-[10px] font-mono font-bold bg-black text-white px-1.5 py-0.5">Base Rate</span>
                 </div>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
-                  Bare equipment only. Client provides licensed operator, daily AGO fueling, and routine consumable top-ups.
+                <p className="text-[11px] opacity-80 mt-1 font-sans">
+                  Machine only. Hirer provides diesel, certified operator and site insurance indemnity.
                 </p>
               </button>
             </div>
           </div>
 
-          {/* Duration Selector & Volume Tiering */}
-          <div className="bg-slate-50 dark:bg-slate-950/70 p-4 rounded-xl border border-slate-200 dark:border-slate-800 space-y-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <span className="text-xs font-mono text-yellow-700 dark:text-yellow-500 uppercase tracking-widest font-bold block">
-                  03 // Rental Duration (Days)
-                </span>
-                <span className="text-[11px] text-slate-500">Weekly (7+ days: 10% off) • Monthly (30+ days: 22% off)</span>
-              </div>
-              <div className="flex items-center gap-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 px-3 py-1 rounded-lg shadow-sm">
+          {/* Step 3: Duration Slider */}
+          <div className="border-2 border-black dark:border-zinc-800 p-4 bg-slate-50 dark:bg-zinc-900 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-black/10 dark:border-zinc-800 pb-2">
+              <span className="text-xs uppercase tracking-widest text-yellow-600 dark:text-yellow-400 font-black">
+                03 // Contract Lease Duration
+              </span>
+              <div className="flex items-center gap-2">
                 <input
                   type="number"
                   min="1"
-                  max="180"
+                  max="90"
                   value={durationDays}
-                  onChange={(e) => setDurationDays(Math.max(1, Number(e.target.value)))}
-                  className="w-16 bg-transparent text-right font-mono text-sm font-bold text-yellow-700 dark:text-yellow-400 focus:outline-none"
+                  onChange={(e) => setDurationDays(Math.max(1, Math.min(90, Number(e.target.value))))}
+                  className="w-20 min-h-[44px] bg-white dark:bg-black border-2 border-black dark:border-zinc-700 px-3 py-1 text-center font-mono text-sm font-bold text-slate-900 dark:text-white"
                 />
-                <span className="text-xs text-slate-500 dark:text-slate-400 font-mono">Days</span>
+                <span className="text-xs font-bold uppercase">Days</span>
               </div>
             </div>
 
@@ -374,41 +414,57 @@ Generated via ${company.name} Heavy Equipment RFQ Portal. Requesting formal prof
               max="60"
               value={durationDays}
               onChange={(e) => setDurationDays(Number(e.target.value))}
-              className="w-full accent-yellow-500 cursor-pointer h-2 bg-slate-200 dark:bg-slate-800 rounded-lg appearance-none"
+              className="w-full accent-yellow-500 cursor-pointer h-3 bg-slate-300 dark:bg-zinc-800 border border-black dark:border-zinc-700 appearance-none"
             />
+          </div>
 
-            {/* Quick Presets */}
-            <div className="flex items-center gap-2 pt-1 flex-wrap">
-              {[
-                { label: '3 Days (Spot)', days: 3 },
-                { label: '7 Days (Weekly -10%)', days: 7 },
-                { label: '14 Days (Bi-Weekly)', days: 14 },
-                { label: '30 Days (Monthly -22%)', days: 30 },
-                { label: '60 Days (Project)', days: 60 },
-              ].map(item => (
-                <button
-                  key={item.days}
-                  type="button"
-                  onClick={() => setDurationDays(item.days)}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-mono transition-colors ${
-                    durationDays === item.days
-                      ? 'bg-yellow-500 text-slate-950 font-bold shadow-sm'
-                      : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800'
-                  }`}
-                >
-                  {item.label}
-                </button>
-              ))}
+          {/* Fleet Comparison Matrix Table (Horizontal Scrollable) */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs uppercase tracking-widest text-yellow-600 dark:text-yellow-400 font-black">
+                Fleet Availability & Spec Matrix
+              </span>
+              <span className="text-xs text-slate-500">Live Yard Inventory</span>
+            </div>
+            <div className="w-full overflow-x-auto border-2 border-black dark:border-zinc-800">
+              <table className="w-full min-w-max text-left text-xs font-mono">
+                <thead className="bg-slate-100 dark:bg-zinc-900 text-slate-700 dark:text-zinc-300 uppercase text-[10px] border-b border-black dark:border-zinc-800">
+                  <tr>
+                    <th className="p-2.5">Asset Class</th>
+                    <th className="p-2.5">Model / Rating</th>
+                    <th className="p-2.5 text-center">Crew Standard</th>
+                    <th className="p-2.5 text-right">Day Rate (₦)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-zinc-900 text-slate-800 dark:text-zinc-200">
+                  {Object.entries(fleetCatalog).map(([k, itm]) => {
+                    const isSelected = selectedCategory === k;
+                    return (
+                      <tr key={k} className={isSelected ? 'bg-yellow-50 dark:bg-yellow-950/40 font-bold' : ''}>
+                        <td className="p-2.5">
+                          {itm.name}
+                          {isSelected && <span className="ml-2 text-[10px] text-yellow-600 font-black">← Active</span>}
+                        </td>
+                        <td className="p-2.5 font-sans text-[11px] text-slate-500 dark:text-zinc-400">{itm.model}</td>
+                        <td className="p-2.5 text-center text-[10px]">{itm.operatorCertification.split('(')[0]}</td>
+                        <td className="p-2.5 text-right tabular-nums font-bold text-yellow-700 dark:text-yellow-400">
+                          {formatNgn(itm.dailyRate)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           </div>
 
-          {/* Lagos / Offshore Mobilization Zones */}
+          {/* Step 4: Mobilization Zones */}
           <div>
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-mono text-yellow-700 dark:text-yellow-500 uppercase tracking-widest font-bold">
+            <div className="flex items-center justify-between mb-3 border-b border-black/10 dark:border-zinc-800 pb-2">
+              <span className="text-xs uppercase tracking-widest text-yellow-600 dark:text-yellow-400 font-black">
                 04 // Mobilization Radius & Lowbed Transit
               </span>
-              <span className="text-xs text-slate-500 dark:text-slate-400">Site location in Lagos/Niger Delta</span>
+              <span className="text-xs text-slate-500">Site Location</span>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               {Object.entries(mobilizationZones).map(([key, zone]) => (
@@ -416,87 +472,63 @@ Generated via ${company.name} Heavy Equipment RFQ Portal. Requesting formal prof
                   key={key}
                   type="button"
                   onClick={() => setMobilizationZone(key)}
-                  className={`p-3 rounded-xl border text-left text-xs transition-all ${
+                  className={`min-h-[44px] p-3 border-2 text-left text-xs transition-all cursor-pointer ${
                     mobilizationZone === key
-                      ? 'bg-yellow-50 border-yellow-500 text-slate-900 dark:bg-yellow-500/10 dark:border-yellow-500 dark:text-white shadow-sm'
-                      : 'bg-slate-50 dark:bg-slate-950/60 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-700'
+                      ? 'bg-yellow-500 text-black border-black font-bold shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]'
+                      : 'bg-slate-50 dark:bg-zinc-900 border-slate-300 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 hover:border-black dark:hover:border-zinc-600'
                   }`}
                 >
-                  <div className="flex items-center justify-between">
-                    <span className="font-semibold text-slate-800 dark:text-slate-200">{zone.name.split('(')[0]}</span>
-                    <span className="font-mono text-yellow-700 dark:text-yellow-500 font-bold">{formatNgn(zone.cost * 1.8)}</span>
-                  </div>
-                  <p className="text-[10px] text-slate-500 mt-1">Roundtrip lowbed carrier mobilization</p>
+                  <span className="block font-bold">{zone.name.split('(')[0]}</span>
+                  <span className="text-[11px] font-mono block mt-1 tabular-nums">
+                    {formatNgn(zone.cost * 1.8)} (Roundtrip Lowbed)
+                  </span>
                 </button>
               ))}
             </div>
           </div>
 
-          {/* Gated Technical Spec-Sheet Unlock */}
-          <div className="pt-2 border-t border-slate-200 dark:border-slate-800 space-y-3">
+          {/* Step 5: Gated Technical Spec Sheet */}
+          <div className="border-2 border-black dark:border-zinc-800 p-4 bg-slate-50 dark:bg-zinc-900 space-y-3">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-mono text-yellow-700 dark:text-yellow-500 uppercase tracking-widest font-bold flex items-center gap-2">
-                <FileCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                05 // Gated Technical Load Chart & Inspection Certs
+              <span className="text-xs uppercase tracking-widest text-yellow-600 dark:text-yellow-400 font-black flex items-center gap-2">
+                <FileCheck className="w-4 h-4 text-emerald-600" />
+                05 // Gated Technical Load Chart & Certs
               </span>
-              <span className="text-xs text-slate-500 dark:text-slate-400">Corporate verification</span>
+              <span className="text-xs text-slate-500">RC Verification</span>
             </div>
 
             {!specSheetUnlocked ? (
-              <form onSubmit={handleUnlockSpecSheet} className="bg-slate-50 dark:bg-slate-950/80 border border-slate-200 dark:border-slate-800 p-4 rounded-xl space-y-3">
-                <div className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300">
-                  <Lock className="w-4 h-4 text-yellow-600 dark:text-yellow-500" />
-                  <span>Enter your Corporate CAC / RC Number to unlock full OEM calibration certificates:</span>
-                </div>
+              <form onSubmit={handleUnlockSpecSheet} className="space-y-3">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <input
                     type="text"
                     required
-                    placeholder="Company RC / CAC Number (e.g. RC-184920)"
+                    placeholder="Company RC / CAC (e.g. RC-184920)"
                     value={rcNumber}
                     onChange={(e) => setRcNumber(e.target.value)}
-                    className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-800 dark:text-slate-200 focus:outline-none focus:border-yellow-500 font-mono shadow-sm"
+                    className="min-h-[44px] bg-white dark:bg-black border-2 border-black dark:border-zinc-700 px-3 py-2 text-xs font-mono"
                   />
                   <input
                     type="email"
                     required
-                    placeholder="Procurement Officer Work Email"
+                    placeholder="Procurement Email"
                     value={procurementEmail}
                     onChange={(e) => setProcurementEmail(e.target.value)}
-                    className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-800 dark:text-slate-200 focus:outline-none focus:border-yellow-500 font-mono shadow-sm"
+                    className="min-h-[44px] bg-white dark:bg-black border-2 border-black dark:border-zinc-700 px-3 py-2 text-xs font-mono"
                   />
                 </div>
                 <button
                   type="submit"
-                  className="bg-yellow-500 hover:bg-yellow-400 text-slate-950 font-bold text-xs py-2 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors shadow-sm"
+                  className="min-h-[44px] w-full bg-black text-yellow-400 dark:bg-yellow-500 dark:text-black font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-colors cursor-pointer"
                 >
                   <Unlock className="w-3.5 h-3.5" />
                   <span>Unlock Technical Spec-Sheet PDF</span>
                 </button>
               </form>
             ) : (
-              <div className="bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-300 dark:border-emerald-500/40 p-4 rounded-xl flex items-center justify-between shadow-sm">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
-                    <Check className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <span className="text-xs font-bold text-emerald-800 dark:text-emerald-300 block">
-                      OEM Calibration Chart & LEEA Rigging Certificate Unlocked
-                    </span>
-                    <span className="text-[10px] text-slate-600 dark:text-slate-400 font-mono">
-                      Verified for: {rcNumber} ({procurementEmail || 'corporate'})
-                    </span>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => alert(`Simulating PDF Download: ${selectedMachine.model} Load Chart.pdf`)}
-                  className="bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs flex items-center gap-1.5 font-mono shadow-sm"
-                >
-                  <Download className="w-3.5 h-3.5 text-yellow-600 dark:text-yellow-500" />
-                  <span>Download PDF</span>
-                </button>
+              <div className="bg-emerald-100 dark:bg-emerald-950 border border-emerald-500 p-3 text-xs font-bold text-emerald-800 dark:text-emerald-300 flex items-center justify-between">
+                <span>LEEA Rigging Cert Unlocked for RC: {rcNumber}</span>
+                <span className="text-emerald-600">✓ Verified</span>
               </div>
             )}
           </div>
@@ -505,140 +537,164 @@ Generated via ${company.name} Heavy Equipment RFQ Portal. Requesting formal prof
 
         {/* Right Column: Commercial RFQ Summary & WhatsApp Dispatch (5 cols) */}
         <div className="lg:col-span-5 space-y-4">
-          <div className="bg-white dark:bg-[#12151D] border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-xl dark:shadow-2xl relative transition-colors duration-200">
+          <div className="bg-white dark:bg-zinc-950 border-2 border-black dark:border-zinc-800 p-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.1)] relative">
             
             <div className="space-y-5">
               
               {/* Header */}
-              <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800">
+              <div className="flex items-center justify-between pb-3 border-b-2 border-black dark:border-zinc-800">
                 <div>
-                  <span className="text-[10px] font-mono uppercase tracking-widest text-yellow-700 dark:text-yellow-500 font-bold">Commercial RFQ Summary</span>
-                  <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                    {company.name} Hire Sheet
+                  <span className="text-xs uppercase tracking-widest text-yellow-600 dark:text-yellow-400 font-black">
+                    Commercial Lease RFQ
+                  </span>
+                  <h3 className="text-lg font-black uppercase text-slate-900 dark:text-white">
+                    {company.name} Hire
                   </h3>
                 </div>
-                <span className="text-xs font-mono bg-yellow-500 text-slate-950 px-2.5 py-1 rounded-lg font-black shadow-sm">
+                <span className="text-xs font-mono bg-black text-yellow-400 px-3 py-1 font-black">
                   {durationDays} Days Hire
                 </span>
               </div>
 
-              {/* Machinery Header Box */}
-              <div className="bg-slate-50 dark:bg-slate-950 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 space-y-1.5 shadow-sm">
-                <span className="text-[10px] font-mono text-yellow-700 dark:text-yellow-500 uppercase tracking-widest block font-bold">Selected Fleet Asset</span>
-                <span className="text-sm font-bold text-slate-900 dark:text-slate-100 block">{selectedMachine.name}</span>
-                <span className="text-xs text-slate-500 dark:text-slate-400 block font-mono">{selectedMachine.model}</span>
-                <p className="text-[11px] text-slate-500 pt-1 border-t border-slate-200 dark:border-slate-900">{selectedMachine.specs}</p>
+              {/* Machinery Selected */}
+              <div className="border border-slate-200 dark:border-zinc-800 p-3.5 space-y-1">
+                <span className="text-[10px] text-yellow-600 dark:text-yellow-400 uppercase font-black block">Selected Plant Asset</span>
+                <span className="text-sm font-black uppercase text-slate-900 dark:text-white block">{selectedMachine.name}</span>
+                <span className="text-xs text-slate-500 block font-mono">{selectedMachine.model}</span>
+                <p className="text-[11px] text-slate-500 pt-1 border-t border-slate-100 dark:border-zinc-900 font-sans">{selectedMachine.specs}</p>
               </div>
 
               {/* Price Breakdown */}
               <div className="space-y-3 text-sm">
-                <div className="flex justify-between items-center text-slate-700 dark:text-slate-300">
+                <div className="flex justify-between items-center text-slate-700 dark:text-zinc-300">
                   <div>
-                    <span className="text-xs text-slate-500 dark:text-slate-400 block">Daily Machine Hire Rate</span>
-                    <span className="text-[11px] text-slate-400 dark:text-slate-500">{leaseType.toUpperCase()} LEASE {durationDiscountPct > 0 ? `(${Math.round(durationDiscountPct * 100)}% off)` : ''}</span>
+                    <span className="text-xs text-slate-500 block">Daily Machine Rate</span>
+                    <span className="text-[11px] text-slate-400 font-sans">{leaseType.toUpperCase()} LEASE</span>
                   </div>
-                  <span className="font-mono font-bold text-yellow-700 dark:text-yellow-400 text-base tabular-nums">
+                  <span className="font-mono font-bold text-yellow-600 dark:text-yellow-400 text-base tabular-nums">
                     {formatNgn(discountedDayRate)} <span className="text-xs text-slate-500 font-normal">/ day</span>
                   </span>
                 </div>
 
-                <div className="flex justify-between items-center text-slate-700 dark:text-slate-300">
+                <div className="flex justify-between items-center text-slate-700 dark:text-zinc-300">
                   <div>
-                    <span className="text-xs text-slate-500 dark:text-slate-400 block">Plant Rental Subtotal</span>
-                    <span className="text-[11px] text-slate-400 dark:text-slate-500">{durationDays} days @ {formatNgn(discountedDayRate)}</span>
+                    <span className="text-xs text-slate-500 block">Plant Rental ({durationDays} Days)</span>
+                    <span className="text-[11px] text-slate-400 font-sans">Base equipment hire</span>
                   </div>
-                  <span className="font-mono font-medium tabular-nums text-slate-900 dark:text-slate-100">{formatNgn(totalMachineRentalNgn)}</span>
+                  <span className="font-mono font-bold tabular-nums text-slate-900 dark:text-white">{formatNgn(totalMachineRentalNgn)}</span>
                 </div>
 
-                <div className="flex justify-between items-center text-slate-700 dark:text-slate-300">
+                <div className="flex justify-between items-center text-slate-700 dark:text-zinc-300">
                   <div>
-                    <span className="text-xs text-slate-500 dark:text-slate-400 block">Lowbed Mobilization & Return</span>
-                    <span className="text-[11px] text-slate-400 dark:text-slate-500">{selectedZone.name.split('(')[0]}</span>
+                    <span className="text-xs text-slate-500 block">Lowbed Mobilization</span>
+                    <span className="text-[11px] text-slate-400 font-sans">{selectedZone.name.split('(')[0]}</span>
                   </div>
-                  <span className="font-mono font-medium tabular-nums text-slate-900 dark:text-slate-100">{formatNgn(mobilizationTotalNgn)}</span>
+                  <span className="font-mono font-bold tabular-nums text-slate-900 dark:text-white">{formatNgn(mobilizationTotalNgn)}</span>
                 </div>
 
-                <div className="flex justify-between items-center text-slate-700 dark:text-slate-300">
+                <div className="flex justify-between items-center text-slate-700 dark:text-zinc-300">
                   <div>
-                    <span className="text-xs text-slate-500 dark:text-slate-400 block">Site Risk & Plant Damage Waiver</span>
-                    <span className="text-[11px] text-slate-400 dark:text-slate-500">3.5% statutory equipment bond</span>
+                    <span className="text-xs text-slate-500 block">Plant Damage Risk Waiver</span>
+                    <span className="text-[11px] text-slate-400 font-sans">3.5% statutory equipment bond</span>
                   </div>
-                  <span className="font-mono font-medium tabular-nums text-slate-900 dark:text-slate-100">{formatNgn(siteWaiverNgn)}</span>
+                  <span className="font-mono font-bold tabular-nums text-slate-900 dark:text-white">{formatNgn(siteWaiverNgn)}</span>
                 </div>
               </div>
 
               {/* Total RFQ Estimate Card */}
-              <div className="bg-slate-50 dark:bg-slate-950 border-2 border-yellow-500/40 rounded-xl p-4 space-y-1 shadow-sm">
-                <span className="text-[11px] font-mono text-yellow-700 dark:text-yellow-500 uppercase tracking-wider block font-bold">
-                  Total Estimated Lease Contract Value
+              <div className="bg-slate-50 dark:bg-black border-2 border-black dark:border-yellow-500 p-4 space-y-1">
+                <span className="text-xs uppercase tracking-wider font-bold text-yellow-600 dark:text-yellow-400 block">
+                  Total Estimated Contract Value
                 </span>
-                <div className="text-2xl font-black text-slate-900 dark:text-white font-mono tabular-nums tracking-tight">
+                <div className="text-3xl font-black text-slate-900 dark:text-white font-mono tabular-nums tracking-tight">
                   {formatNgn(totalContractNgn)}
                 </div>
-                <p className="text-[10px] text-slate-500 pt-1">
+                <p className="text-[10px] text-slate-500 pt-1 font-sans">
                   *Includes operator allowances, scheduled oil changes, and mobilization permits.
                 </p>
               </div>
 
-              {/* Action Buttons */}
+              {/* Action Buttons (All min-h-[44px]) */}
               <div className="space-y-2 pt-2">
                 <a
                   href={whatsappUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-2 text-sm shadow-lg shadow-emerald-950/20 dark:shadow-emerald-950/40 transition-all group"
+                  className="w-full min-h-[48px] bg-emerald-600 hover:bg-emerald-500 text-white font-black py-3 px-4 flex items-center justify-center gap-2 text-xs uppercase tracking-wider transition-all shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5"
                 >
-                  <Send className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
+                  <Send className="w-4 h-4" />
                   <span>Dispatch RFQ to Fleet Desk</span>
                   <ExternalLink className="w-3.5 h-3.5 opacity-70 ml-1" />
                 </a>
 
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <button
                     type="button"
                     onClick={() => setIsWhatsAppSimOpen(true)}
-                    className="bg-slate-100 hover:bg-slate-200 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200 text-xs font-semibold py-2.5 px-3 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-center gap-1.5 transition-colors shadow-sm"
+                    className="min-h-[44px] bg-slate-100 hover:bg-slate-200 dark:bg-zinc-900 dark:hover:bg-zinc-800 text-slate-900 dark:text-white text-xs font-bold py-2.5 px-3 border border-black dark:border-zinc-700 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
                   >
-                    <Smartphone className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                    <Smartphone className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                     <span>WhatsApp Simulator</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setIsInvoiceOpen(true)}
-                    className="bg-slate-100 hover:bg-slate-200 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200 text-xs font-semibold py-2.5 px-3 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-center gap-1.5 transition-colors shadow-sm"
+                    className="min-h-[44px] bg-slate-100 hover:bg-slate-200 dark:bg-zinc-900 dark:hover:bg-zinc-800 text-slate-900 dark:text-white text-xs font-bold py-2.5 px-3 border border-black dark:border-zinc-700 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
                   >
-                    <Printer className="w-3.5 h-3.5 text-yellow-600 dark:text-yellow-400" />
+                    <Printer className="w-4 h-4 text-yellow-600 dark:text-yellow-400" />
                     <span>Proforma PDF</span>
                   </button>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={handleCopy}
-                  className="w-full bg-slate-100 hover:bg-slate-200 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 font-mono text-xs py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 border border-slate-200 dark:border-slate-700 transition-colors shadow-sm"
-                >
-                  {copied ? (
-                    <>
-                      <Check className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                      <span className="text-emerald-700 dark:text-emerald-400 font-semibold">RFQ Payload Copied!</span>
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="w-4 h-4 text-slate-500 dark:text-slate-400" />
-                      <span>Copy Enterprise RFQ Spec</span>
-                    </>
-                  )}
-                </button>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={handleCopyShareLink}
+                    className="min-h-[44px] bg-slate-100 hover:bg-slate-200 dark:bg-zinc-900 dark:hover:bg-zinc-800 text-slate-900 dark:text-white font-mono text-xs font-bold py-2.5 px-3 border border-black dark:border-zinc-700 flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                  >
+                    {copiedLink ? (
+                      <>
+                        <Check className="w-4 h-4 text-emerald-600" />
+                        <span className="text-emerald-700 dark:text-emerald-400">Link Copied!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Link2 className="w-4 h-4 text-slate-600 dark:text-zinc-400" />
+                        <span>Copy Quote Link</span>
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleCopy}
+                    className="min-h-[44px] bg-slate-100 hover:bg-slate-200 dark:bg-zinc-900 dark:hover:bg-zinc-800 text-slate-900 dark:text-white font-mono text-xs font-bold py-2.5 px-3 border border-black dark:border-zinc-700 flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                  >
+                    {copied ? (
+                      <>
+                        <Check className="w-4 h-4 text-emerald-600" />
+                        <span className="text-emerald-700 dark:text-emerald-400">RFQ Copied!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-4 h-4 text-slate-600 dark:text-zinc-400" />
+                        <span>Copy Raw RFQ</span>
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
 
               {/* Desk Information Footer */}
-              <div className="pt-3 border-t border-slate-200 dark:border-slate-800/80 text-[11px] text-slate-500 flex items-center justify-between">
+              <div className="pt-3 border-t border-black/10 dark:border-zinc-800 text-xs text-slate-500 flex items-center justify-between">
                 <span className="flex items-center gap-1.5">
-                  <MapPin className="w-3 h-3 text-slate-400" />
+                  <MapPin className="w-3.5 h-3.5 text-slate-400" />
                   {company.location}
                 </span>
-                <span className="font-mono text-yellow-700 dark:text-yellow-500/80 font-medium">ISO 9001 Safety Compliant</span>
+                <span className="font-mono text-yellow-600 dark:text-yellow-400 font-bold uppercase">
+                  ISO 9001 Safety Compliant
+                </span>
               </div>
 
             </div>

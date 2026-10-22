@@ -2,27 +2,29 @@ import React, { useState, useEffect } from 'react';
 import { 
   Plane, 
   Ship, 
-  Calculator, 
+  Calendar, 
   Clock, 
   ShieldCheck, 
+  FileText, 
   ArrowRight, 
   Copy, 
   Check, 
   Send, 
-  AlertCircle, 
-  Layers, 
-  DollarSign, 
-  Scale, 
-  Box, 
-  FileText,
-  Sparkles,
-  MapPin,
+  Sliders, 
+  MapPin, 
+  Sparkles, 
+  HelpCircle,
+  TrendingUp,
+  DollarSign,
+  AlertTriangle,
   ExternalLink,
   Smartphone,
-  Printer
+  Printer,
+  Link2
 } from 'lucide-react';
 import WhatsAppSimulatorModal from '../common/WhatsAppSimulatorModal';
 import ProformaInvoiceModal from '../common/ProformaInvoiceModal';
+import { getHashParams, updateHashParams, buildShareUrl } from '../../utils/urlState';
 
 export default function FreightEstimatorEngine({ company }) {
   const custom = company?.customMetrics || {
@@ -32,20 +34,50 @@ export default function FreightEstimatorEngine({ company }) {
     handlingFeeNgn: 4500
   };
 
+  // Read initial configuration from URL params
+  const initialParams = getHashParams();
+
   // State
-  const [freightType, setFreightType] = useState('air'); // 'air' | 'sea'
-  const [origin, setOrigin] = useState('Guangzhou (CAN)');
+  const [freightType, setFreightType] = useState(
+    initialParams.service === 'sea' ? 'sea' : 'air'
+  );
+  const [origin, setOrigin] = useState(initialParams.origin || 'Guangzhou (CAN)');
   const [destination, setDestination] = useState('MMA Cargo Terminal, Lagos');
-  const [cargoCategory, setCargoCategory] = useState('general');
-  const [weightKg, setWeightKg] = useState(85);
-  const [volumeCbm, setVolumeCbm] = useState(2.5);
-  const [invoiceValueUsd, setInvoiceValueUsd] = useState(1200);
-  const [dutyBracket, setDutyBracket] = useState(0.10); // 10% duty
-  const [includeClearing, setIncludeClearing] = useState(true);
-  const [currencyView, setCurrencyView] = useState('NGN'); // 'NGN' | 'USD'
+  const [cargoCategory, setCargoCategory] = useState(initialParams.cat || 'general');
+  const [weightKg, setWeightKg] = useState(
+    initialParams.weight ? Math.max(1, Number(initialParams.weight)) : 85
+  );
+  const [volumeCbm, setVolumeCbm] = useState(
+    initialParams.cbm ? Math.max(0.1, Number(initialParams.cbm)) : 2.5
+  );
+  const [invoiceValueUsd, setInvoiceValueUsd] = useState(
+    initialParams.val ? Math.max(100, Number(initialParams.val)) : 1200
+  );
+  const [dutyBracket, setDutyBracket] = useState(0.10);
+  const [includeClearing, setIncludeClearing] = useState(
+    initialParams.clearing !== '0'
+  );
+  const [currencyView, setCurrencyView] = useState(
+    initialParams.curr === 'USD' ? 'USD' : 'NGN'
+  );
+
   const [copied, setCopied] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
   const [isWhatsAppSimOpen, setIsWhatsAppSimOpen] = useState(false);
   const [isInvoiceOpen, setIsInvoiceOpen] = useState(false);
+
+  // Sync state to URL hash query parameters on change
+  useEffect(() => {
+    updateHashParams({
+      service: freightType,
+      origin: origin,
+      weight: freightType === 'air' ? weightKg : undefined,
+      cbm: freightType === 'sea' ? volumeCbm : undefined,
+      clearing: includeClearing ? '1' : '0',
+      curr: currencyView,
+      cat: cargoCategory
+    }, company?.slug);
+  }, [freightType, origin, weightKg, volumeCbm, includeClearing, currencyView, cargoCategory, company?.slug]);
 
   // Countdown timer simulation for next consolidation cut-off
   const [timeLeft, setTimeLeft] = useState({ days: 2, hours: 14, minutes: 27, seconds: 43 });
@@ -73,7 +105,7 @@ export default function FreightEstimatorEngine({ company }) {
     fashion: { name: 'Apparel, Shoes & Textiles', airFactor: 1.05, seaFactor: 1.02 }
   };
 
-  const selectedCat = categoryMultipliers[cargoCategory];
+  const selectedCat = categoryMultipliers[cargoCategory] || categoryMultipliers.general;
 
   // Freight Calculation
   let freightCostUsd = 0;
@@ -91,11 +123,11 @@ export default function FreightEstimatorEngine({ company }) {
   // Statutory Customs Duty & Surcharges (Nigeria Customs Service Tariff Formulation)
   const cifValueNgn = (invoiceValueUsd * exchangeRate) + freightCostNgn;
   const customsDutyNgn = includeClearing ? cifValueNgn * dutyBracket : 0;
-  const cissNgn = includeClearing ? cifValueNgn * 0.01 : 0; // 1% CISS
-  const etlsNgn = includeClearing ? cifValueNgn * 0.005 : 0; // 0.5% ETLS
-  const portLevyNgn = includeClearing ? customsDutyNgn * 0.07 : 0; // 7% Surcharge on Duty
-  const vatNgn = includeClearing ? (cifValueNgn + customsDutyNgn + portLevyNgn) * 0.075 : 0; // 7.5% VAT
-  const clearanceAdminFeeNgn = includeClearing ? 45000 : 0; // PAAR/terminal handling
+  const cissNgn = includeClearing ? cifValueNgn * 0.01 : 0;
+  const etlsNgn = includeClearing ? cifValueNgn * 0.005 : 0;
+  const portLevyNgn = includeClearing ? customsDutyNgn * 0.07 : 0;
+  const vatNgn = includeClearing ? (cifValueNgn + customsDutyNgn + portLevyNgn) * 0.075 : 0;
+  const clearanceAdminFeeNgn = includeClearing ? 45000 : 0;
 
   const totalClearingNgn = customsDutyNgn + cissNgn + etlsNgn + portLevyNgn + vatNgn + clearanceAdminFeeNgn;
   const totalLandedCostNgn = freightCostNgn + handlingFeeNgn + totalClearingNgn;
@@ -108,17 +140,22 @@ export default function FreightEstimatorEngine({ company }) {
   // Automated WhatsApp Booking Card Generation
   const whatsappBookingText = `*BOOKING INQUIRY // ${company.name.toUpperCase()}*
 ---------------------------------------
-• Route: ${origin} ➔ ${destination}
-• Service: ${freightType === 'air' ? 'AIR CARGO CONSOLIDATION' : 'OCEAN FREIGHT LCL/FCL'}
-• Category: ${selectedCat.name}
-• Metrics: ${freightType === 'air' ? `${weightKg} KG Gross Weight` : `${volumeCbm} CBM Volume`}
-• Declared Value: $${invoiceValueUsd.toLocaleString()}
+• Transit Mode: ${freightType.toUpperCase()} FREIGHT
+• Corridor: ${origin} ➔ ${destination}
+• Commodity Type: ${selectedCat.name}
+• Billable Spec: ${freightType === 'air' ? `${weightKg} KG Gross Weight` : `${volumeCbm} CBM Volume`}
+• Commercial Value: $${invoiceValueUsd.toLocaleString()} USD (~${formatNgn(invoiceValueUsd * exchangeRate)})
+• Turnkey Clearing: ${includeClearing ? 'YES (Includes Customs Duty, CISS, ETLS, VAT)' : 'NO (Freight Only)'}
 ---------------------------------------
-• Freight Estimate: ${formatNgn(freightCostNgn)} (${formatUsd(freightCostUsd)})
-• Terminal Handling: ${formatNgn(handlingFeeNgn)}
-${includeClearing ? `• Est. Customs & Clearing: ${formatNgn(totalClearingNgn)}\n` : ''}• *TOTAL LANDED ESTIMATE: ${formatNgn(totalLandedCostNgn)}*
+*LANDED COST ESTIMATE (FX @ ₦${exchangeRate}/$):*
+• International Freight: ${formatNgn(freightCostNgn)} (${formatUsd(freightCostUsd)})
+• Handling & Terminal Dues: ${formatNgn(handlingFeeNgn)}
+${includeClearing ? `• Statutory Customs Duty (10%): ${formatNgn(customsDutyNgn)}
+• Port Levies & Surcharges: ${formatNgn(cissNgn + etlsNgn + portLevyNgn)}
+• Import VAT (7.5%) & PAAR: ${formatNgn(vatNgn + clearanceAdminFeeNgn)}\n` : ''}---------------------------------------
+*TOTAL LANDED QUOTE: ${formatNgn(totalLandedCostNgn)} (~${formatUsd(totalLandedCostUsd)})*
 ---------------------------------------
-Generated via ${company.name} Automated Rate Portal. Please confirm space allocation for this shipment.`;
+Generated via ${company.name} Automated Rate Engine. Please confirm consolidation space allocation.`;
 
   const handleCopy = () => {
     navigator.clipboard.writeText(whatsappBookingText);
@@ -126,561 +163,487 @@ Generated via ${company.name} Automated Rate Portal. Please confirm space alloca
     setTimeout(() => setCopied(false), 2200);
   };
 
+  const handleCopyShareLink = () => {
+    const shareUrl = buildShareUrl(company.slug, {
+      service: freightType,
+      origin: origin,
+      weight: freightType === 'air' ? weightKg : undefined,
+      cbm: freightType === 'sea' ? volumeCbm : undefined,
+      clearing: includeClearing ? '1' : '0',
+      curr: currencyView,
+      cat: cargoCategory
+    });
+    navigator.clipboard.writeText(shareUrl);
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2200);
+  };
+
   const phoneTarget = company.samplePhone || '2348033045612';
   const whatsappUrl = `https://wa.me/${phoneTarget}?text=${encodeURIComponent(whatsappBookingText)}`;
 
   const invoiceData = {
-    title: `${freightType === 'air' ? 'Air Cargo Consolidation' : 'Ocean Container Freight'} Landed Quote`,
-    subtitle: `Transit Route: ${origin} ➔ ${destination}`,
+    title: `${freightType.toUpperCase()} Freight Quotation & Landing BOQ`,
+    subtitle: `Corridor: ${origin} ➔ Lagos • Spec: ${freightType === 'air' ? `${weightKg} KG` : `${volumeCbm} CBM`}`,
     subtotal: freightCostNgn + handlingFeeNgn,
-    surcharges: cissNgn + etlsNgn + portLevyNgn + clearanceAdminFeeNgn,
-    vat: vatNgn,
+    surcharges: totalClearingNgn,
+    vat: Math.round(vatNgn),
     total: totalLandedCostNgn,
     items: [
       {
-        name: `${freightType === 'air' ? 'Air Freight Cargo Space Allocation' : 'Ocean Container Freight Transit'}`,
-        desc: `${selectedCat.name} (${freightType === 'air' ? `${weightKg} KG` : `${volumeCbm} CBM`}) from ${origin.split(' ')[0]} to Lagos`,
+        name: `International Freight (${freightType.toUpperCase()})`,
+        desc: `${origin} to Lagos Cargo Airport/Port (${selectedCat.name})`,
         qty: freightType === 'air' ? `${weightKg} KG` : `${volumeCbm} CBM`,
         rate: freightType === 'air' ? (custom.airRateUsd * selectedCat.airFactor * exchangeRate) : (custom.seaRateUsd * selectedCat.seaFactor * exchangeRate),
         total: freightCostNgn
       },
       {
-        name: 'Lagos Terminal Handling & Port Dues',
-        desc: 'Ground handling, sorting, physical transfer and security scanning',
+        name: 'Terminal Handling & Consolidation Charges',
+        desc: 'Lagos warehouse handling, security scanning and tallying',
         qty: '1 Consignment',
         rate: handlingFeeNgn,
         total: handlingFeeNgn
       },
       ...(includeClearing ? [
         {
-          name: `Customs Statutory Import Duty (${dutyBracket * 100}%)`,
-          desc: `Calculated on commercial invoice CIF value ($${invoiceValueUsd.toLocaleString()})`,
-          qty: 'Statutory Tariff',
+          name: 'Nigeria Customs Statutory Duty (10%)',
+          desc: 'Statutory import tariff assessed on CIF landed valuation',
+          qty: 'Statutory',
           rate: customsDutyNgn,
           total: customsDutyNgn
         },
         {
-          name: 'Nigeria Customs Port Surcharges & PAAR Processing',
-          desc: '1% CISS, 0.5% ETLS, 7% Port Development Surcharge, PAAR documentation',
-          qty: 'Statutory Fees',
-          rate: cissNgn + etlsNgn + portLevyNgn + clearanceAdminFeeNgn,
-          total: cissNgn + etlsNgn + portLevyNgn + clearanceAdminFeeNgn
+          name: 'Port Surcharges (CISS, ETLS, Port Dev Levy)',
+          desc: 'Statutory trade levies and port operational surcharges',
+          qty: 'Combined',
+          rate: cissNgn + etlsNgn + portLevyNgn,
+          total: cissNgn + etlsNgn + portLevyNgn
+        },
+        {
+          name: 'PAAR Documentation & Import VAT (7.5%)',
+          desc: 'Pre-Arrival Assessment Report processing and statutory Federal VAT',
+          qty: 'Standard',
+          rate: vatNgn + clearanceAdminFeeNgn,
+          total: vatNgn + clearanceAdminFeeNgn
         }
       ] : [])
     ]
   };
 
   return (
-    <div className="w-full max-w-7xl mx-auto space-y-6">
-      {/* Top Banner: Urgency & Consolidation Schedule */}
-      <div className="bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-slate-100 dark:from-amber-950/40 dark:via-amber-900/20 dark:to-slate-900/60 border border-amber-300 dark:border-amber-500/30 rounded-xl p-4 flex flex-col md:flex-row items-center justify-between gap-4 backdrop-blur-sm transition-colors duration-200 shadow-sm dark:shadow-none">
+    <div className="w-full max-w-7xl mx-auto space-y-6 font-mono text-slate-900 dark:text-slate-100">
+      
+      {/* Top Banner: Shipment Cut-Off Countdown (Brutalist) */}
+      <div className="bg-white dark:bg-zinc-950 border-2 border-black dark:border-zinc-800 p-4 sm:p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.1)]">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-600 dark:text-amber-400">
-            <Clock className="w-5 h-5 animate-pulse" />
+          <div className="w-11 h-11 bg-black text-amber-400 dark:bg-amber-500 dark:text-black flex items-center justify-center font-black shrink-0">
+            <Clock className="w-6 h-6 animate-pulse" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-mono tracking-wider uppercase text-amber-700 dark:text-amber-400 font-semibold">Priority Schedule</span>
-              <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs uppercase tracking-widest text-amber-600 dark:text-amber-400 font-black">
+                Air & Sea Cargo Cut-Off Desk
+              </span>
+              <span className="text-[11px] px-2 py-0.5 border font-bold uppercase bg-amber-100 text-amber-900 border-amber-500 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-500">
+                Weekly Flight LOS-CAN
+              </span>
             </div>
-            <p className="text-sm font-medium text-slate-800 dark:text-slate-200">
-              Next scheduled consolidation flight departing from <strong className="text-amber-700 dark:text-amber-300">Guangzhou (CAN)</strong> closes in:
+            <p className="text-xs text-slate-600 dark:text-zinc-400 font-sans mt-0.5">
+              Live landed calculation and automated customs clearance booking for <strong className="text-black dark:text-white font-mono">{company.name}</strong>.
             </p>
           </div>
         </div>
-        
-        {/* Countdown Box */}
-        <div className="flex items-center gap-2 font-mono text-center">
-          <div className="bg-white dark:bg-slate-950/80 border border-amber-300 dark:border-amber-500/30 px-3 py-1.5 rounded-lg shadow-sm">
-            <span className="text-lg font-bold text-amber-700 dark:text-amber-400 tabular-nums">{String(timeLeft.days).padStart(2, '0')}</span>
-            <span className="block text-[10px] text-slate-500 dark:text-slate-400 uppercase">Days</span>
-          </div>
-          <span className="text-amber-500 font-bold">:</span>
-          <div className="bg-white dark:bg-slate-950/80 border border-amber-300 dark:border-amber-500/30 px-3 py-1.5 rounded-lg shadow-sm">
-            <span className="text-lg font-bold text-amber-700 dark:text-amber-400 tabular-nums">{String(timeLeft.hours).padStart(2, '0')}</span>
-            <span className="block text-[10px] text-slate-500 dark:text-slate-400 uppercase">Hours</span>
-          </div>
-          <span className="text-amber-500 font-bold">:</span>
-          <div className="bg-white dark:bg-slate-950/80 border border-amber-300 dark:border-amber-500/30 px-3 py-1.5 rounded-lg shadow-sm">
-            <span className="text-lg font-bold text-amber-700 dark:text-amber-400 tabular-nums">{String(timeLeft.minutes).padStart(2, '0')}</span>
-            <span className="block text-[10px] text-slate-500 dark:text-slate-400 uppercase">Mins</span>
-          </div>
-          <span className="text-amber-500 font-bold">:</span>
-          <div className="bg-white dark:bg-slate-950/80 border border-amber-300 dark:border-amber-500/30 px-3 py-1.5 rounded-lg shadow-sm">
-            <span className="text-lg font-bold text-amber-700 dark:text-amber-400 tabular-nums">{String(timeLeft.seconds).padStart(2, '0')}</span>
-            <span className="block text-[10px] text-slate-500 dark:text-slate-400 uppercase">Secs</span>
+
+        {/* Action Controls: Share Link + Countdown */}
+        <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+          <button
+            type="button"
+            onClick={handleCopyShareLink}
+            className="min-h-[44px] px-4 py-2 border-2 border-black dark:border-zinc-700 bg-slate-100 hover:bg-slate-200 dark:bg-zinc-900 dark:hover:bg-zinc-800 text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer"
+            title="Copy sharable URL preserving all current weight, origin and duty parameters"
+          >
+            {copiedLink ? (
+              <>
+                <Check className="w-4 h-4 text-emerald-600" />
+                <span className="text-emerald-700 dark:text-emerald-400">Link Copied!</span>
+              </>
+            ) : (
+              <>
+                <Link2 className="w-4 h-4 text-slate-600 dark:text-zinc-400" />
+                <span>Share Quote Link</span>
+              </>
+            )}
+          </button>
+
+          <div className="flex items-center gap-1.5 bg-black text-amber-400 px-3 py-2 font-mono text-xs font-black">
+            <span>Cut-Off:</span>
+            <span className="tabular-nums">
+              {String(timeLeft.days).padStart(2, '0')}d : {String(timeLeft.hours).padStart(2, '0')}h : {String(timeLeft.minutes).padStart(2, '0')}m
+            </span>
           </div>
         </div>
       </div>
 
-      {/* Main Grid: Controls vs Live Financial Quotation */}
+      {/* Main Grid: Responsive 12-column layout */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         
-        {/* Left Column: Interactive Configuration Inputs (7 cols) */}
-        <div className="lg:col-span-7 bg-white dark:bg-slate-900/70 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 space-y-6 backdrop-blur-md shadow-xl dark:shadow-2xl transition-colors duration-200">
+        {/* Left Column: Calculator Controls (7 cols) */}
+        <div className="lg:col-span-7 bg-white dark:bg-zinc-950 border-2 border-black dark:border-zinc-800 p-5 sm:p-6 space-y-6">
           
-          {/* Header & Mode Switcher */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-200 dark:border-slate-800 gap-3">
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-mono uppercase tracking-widest text-amber-600 dark:text-amber-400 font-bold">Rate Calculator</span>
-                <span className="text-xs bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-2 py-0.5 rounded border border-slate-200 dark:border-slate-700">FX @ ₦{exchangeRate}/$</span>
-              </div>
-              <h2 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">{company.name} Cargo Matrix</h2>
+          {/* Mode Switcher: Air vs Sea */}
+          <div>
+            <div className="flex items-center justify-between mb-3 border-b border-black/10 dark:border-zinc-800 pb-2">
+              <span className="text-xs uppercase tracking-widest text-amber-600 dark:text-amber-400 font-black">
+                01 // Select Freight Transit Mode
+              </span>
+              <span className="text-xs text-slate-500">Air Express vs Sea Container</span>
             </div>
-
-            {/* Air / Sea Toggle Buttons */}
-            <div className="flex p-1 bg-slate-100 dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-slate-800 self-start sm:self-auto">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <button
+                type="button"
                 onClick={() => setFreightType('air')}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
+                className={`min-h-[44px] p-3.5 border-2 text-left transition-all cursor-pointer ${
                   freightType === 'air'
-                    ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 shadow-md font-bold'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                    ? 'bg-amber-500 text-black border-black font-bold shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]'
+                    : 'bg-slate-50 dark:bg-zinc-900 border-slate-300 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 hover:border-black dark:hover:border-zinc-600'
                 }`}
               >
-                <Plane className="w-4 h-4" />
-                Air Freight
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Plane className="w-4 h-4 text-black dark:text-amber-400" />
+                    <span className="text-xs font-black uppercase">Air Freight Express</span>
+                  </div>
+                  <span className="text-[10px] font-mono font-bold bg-black text-white px-1.5 py-0.5">3-5 Days</span>
+                </div>
+                <p className="text-[11px] opacity-80 mt-1 font-sans">
+                  Rate from ${custom.airRateUsd}/KG gross. Guangzhou / London / Houston to Lagos.
+                </p>
               </button>
+
               <button
+                type="button"
                 onClick={() => setFreightType('sea')}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
+                className={`min-h-[44px] p-3.5 border-2 text-left transition-all cursor-pointer ${
                   freightType === 'sea'
-                    ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md font-bold'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                    ? 'bg-amber-500 text-black border-black font-bold shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]'
+                    : 'bg-slate-50 dark:bg-zinc-900 border-slate-300 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 hover:border-black dark:hover:border-zinc-600'
                 }`}
               >
-                <Ship className="w-4 h-4" />
-                Sea Cargo
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Ship className="w-4 h-4 text-black dark:text-amber-400" />
+                    <span className="text-xs font-black uppercase">Ocean Cargo (CBM)</span>
+                  </div>
+                  <span className="text-[10px] font-mono font-bold bg-black text-white px-1.5 py-0.5">35-45 Days</span>
+                </div>
+                <p className="text-[11px] opacity-80 mt-1 font-sans">
+                  Rate from ${custom.seaRateUsd}/CBM. Bulk groupage and full container load (FCL).
+                </p>
               </button>
             </div>
           </div>
 
-          {/* Route Selectors */}
+          {/* Transit Corridor & Category */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-mono text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-2 font-medium">
-                Origin Logistics Hub
+              <label className="text-xs uppercase tracking-widest text-amber-600 dark:text-amber-400 font-black block mb-2">
+                Origin Hub
               </label>
               <select
                 value={origin}
                 onChange={(e) => setOrigin(e.target.value)}
-                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3.5 py-2.5 text-sm text-slate-800 dark:text-slate-200 focus:outline-none focus:border-amber-500 transition-colors shadow-sm dark:shadow-none"
+                className="w-full min-h-[44px] bg-slate-50 dark:bg-black border-2 border-black dark:border-zinc-700 px-3 py-2 text-xs font-mono font-bold text-slate-900 dark:text-white"
               >
-                <option value="Guangzhou (CAN), China">Guangzhou Hub (CAN), China</option>
-                <option value="Yiwu Warehouse (YIW), China">Yiwu Consolidation (YIW), China</option>
-                <option value="London Heathrow (LHR), UK">London Heathrow (LHR), United Kingdom</option>
-                <option value="New York (JFK), USA">New York (JFK), United States</option>
-                <option value="Dubai Cargo Village (DXB), UAE">Dubai Cargo Village (DXB), UAE</option>
-                <option value="Istanbul Airport (IST), Turkey">Istanbul Airport (IST), Turkey</option>
+                <option value="Guangzhou (CAN)">Guangzhou Baiyun (CAN), China</option>
+                <option value="Yiwu / Ningbo (NGB)">Yiwu / Ningbo (NGB), China</option>
+                <option value="London Heathrow (LHR)">London Heathrow (LHR), UK</option>
+                <option value="Houston / JFK (IAH)">Houston / New York (JFK), USA</option>
+                <option value="Dubai Cargo Village (DXB)">Dubai Cargo Village (DXB), UAE</option>
               </select>
             </div>
 
             <div>
-              <label className="block text-xs font-mono text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-2 font-medium">
-                Lagos Destination Terminal
+              <label className="text-xs uppercase tracking-widest text-amber-600 dark:text-amber-400 font-black block mb-2">
+                Cargo Classification
               </label>
               <select
-                value={destination}
-                onChange={(e) => setDestination(e.target.value)}
-                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3.5 py-2.5 text-sm text-slate-800 dark:text-slate-200 focus:outline-none focus:border-amber-500 transition-colors shadow-sm dark:shadow-none"
+                value={cargoCategory}
+                onChange={(e) => setCargoCategory(e.target.value)}
+                className="w-full min-h-[44px] bg-slate-50 dark:bg-black border-2 border-black dark:border-zinc-700 px-3 py-2 text-xs font-mono font-bold text-slate-900 dark:text-white"
               >
-                <option value="MMA Cargo Terminal, Ikeja">MMA Cargo Terminal (Ikeja, Lagos)</option>
-                <option value="Apapa Ocean Terminal, Lagos">Apapa Port Corridor (Wharf Road)</option>
-                <option value="Tin Can Island Port, Lagos">Tin Can Island Terminal</option>
-                <option value="Lillypond Container Depot, Ijora">Lillypond Container Depot, Ijora</option>
-                <option value="Direct Doorstep Courier (Lagos Island/Mainland)">Doorstep Delivery (Lagos Express)</option>
+                <option value="general">General Merchandise (1.0x)</option>
+                <option value="electronics">Electronics / Battery Goods (+18%)</option>
+                <option value="spares">Industrial Tools / Heavy Spares (+10%)</option>
+                <option value="fashion">Apparel, Shoes & Textiles (+5%)</option>
               </select>
             </div>
           </div>
 
-          {/* Cargo Classification */}
-          <div>
-            <label className="block text-xs font-mono text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-2 font-medium">
-              Cargo Classification
-            </label>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-              {Object.entries(categoryMultipliers).map(([key, item]) => (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => setCargoCategory(key)}
-                  className={`p-2.5 rounded-xl border text-left text-xs transition-all ${
-                    cargoCategory === key
-                      ? 'bg-amber-50 border-amber-500 text-amber-900 font-semibold shadow-sm dark:bg-amber-500/10 dark:border-amber-500/60 dark:text-amber-300 dark:shadow-inner'
-                      : 'bg-slate-50 dark:bg-slate-950/60 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-700'
-                  }`}
-                >
-                  <span className="block font-medium truncate">{item.name}</span>
-                  <span className="text-[10px] text-slate-500 block mt-0.5">
-                    {freightType === 'air' ? `Rate x${item.airFactor}` : `Rate x${item.seaFactor}`}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Dynamic Sliders based on Air vs Sea */}
-          {freightType === 'air' ? (
-            <div className="space-y-3 bg-slate-50 dark:bg-slate-950/50 p-4 rounded-xl border border-slate-200 dark:border-slate-800/80">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-mono uppercase text-slate-700 dark:text-slate-300 flex items-center gap-2 font-semibold">
-                  <Scale className="w-4 h-4 text-amber-600 dark:text-amber-400" />
-                  Consignment Gross Weight (Kilograms)
-                </span>
-                <div className="flex items-center gap-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 px-3 py-1 rounded-lg shadow-sm">
-                  <input
-                    type="number"
-                    min="1"
-                    max="3000"
-                    value={weightKg}
-                    onChange={(e) => setWeightKg(Math.max(1, Number(e.target.value)))}
-                    className="w-16 bg-transparent text-right font-mono text-sm font-bold text-amber-600 dark:text-amber-400 focus:outline-none"
-                  />
-                  <span className="text-xs text-slate-500 dark:text-slate-400 font-mono">KG</span>
-                </div>
-              </div>
-
-              <input
-                type="range"
-                min="5"
-                max="1000"
-                step="5"
-                value={weightKg}
-                onChange={(e) => setWeightKg(Number(e.target.value))}
-                className="w-full accent-amber-500 cursor-pointer h-2 bg-slate-200 dark:bg-slate-800 rounded-lg appearance-none"
-              />
-
-              {/* Quick weight presets */}
-              <div className="flex items-center gap-2 pt-1">
-                <span className="text-[10px] text-slate-500 uppercase font-mono">Quick Presets:</span>
-                {[20, 50, 150, 300, 500].map(val => (
-                  <button
-                    key={val}
-                    type="button"
-                    onClick={() => setWeightKg(val)}
-                    className={`px-2 py-0.5 rounded text-[11px] font-mono transition-colors ${
-                      weightKg === val 
-                        ? 'bg-amber-500 text-slate-950 font-bold shadow-sm' 
-                        : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-transparent'
-                    }`}
-                  >
-                    {val}kg
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-3 bg-slate-50 dark:bg-slate-950/50 p-4 rounded-xl border border-slate-200 dark:border-slate-800/80">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-mono uppercase text-slate-700 dark:text-slate-300 flex items-center gap-2 font-semibold">
-                  <Box className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-                  Cargo Volume (Cubic Meters - CBM)
-                </span>
-                <div className="flex items-center gap-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 px-3 py-1 rounded-lg shadow-sm">
-                  <input
-                    type="number"
-                    min="0.5"
-                    max="70"
-                    step="0.5"
-                    value={volumeCbm}
-                    onChange={(e) => setVolumeCbm(Math.max(0.5, Number(e.target.value)))}
-                    className="w-16 bg-transparent text-right font-mono text-sm font-bold text-blue-600 dark:text-blue-400 focus:outline-none"
-                  />
-                  <span className="text-xs text-slate-500 dark:text-slate-400 font-mono">CBM</span>
-                </div>
-              </div>
-
-              <input
-                type="range"
-                min="0.5"
-                max="68"
-                step="0.5"
-                value={volumeCbm}
-                onChange={(e) => setVolumeCbm(Number(e.target.value))}
-                className="w-full accent-blue-500 cursor-pointer h-2 bg-slate-200 dark:bg-slate-800 rounded-lg appearance-none"
-              />
-
-              {/* Container presets */}
-              <div className="flex items-center gap-2 pt-1 flex-wrap">
-                <span className="text-[10px] text-slate-500 uppercase font-mono">Container Milestones:</span>
-                {[
-                  { label: '1 CBM (LCL)', val: 1.0 },
-                  { label: '5 CBM (Groupage)', val: 5.0 },
-                  { label: '28 CBM (20ft FCL)', val: 28.0 },
-                  { label: '68 CBM (40ft HQ)', val: 68.0 },
-                ].map(item => (
-                  <button
-                    key={item.val}
-                    type="button"
-                    onClick={() => setVolumeCbm(item.val)}
-                    className={`px-2 py-0.5 rounded text-[11px] font-mono transition-colors ${
-                      volumeCbm === item.val 
-                        ? 'bg-blue-600 text-white font-bold shadow-sm' 
-                        : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-transparent'
-                    }`}
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Customs Duty & Statutory Clearing Section */}
-          <div className="pt-2 border-t border-slate-200 dark:border-slate-800 space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                <span className="text-xs font-mono uppercase tracking-wider text-slate-700 dark:text-slate-200 font-semibold">
-                  Customs Duty & Port Surcharges
-                </span>
-              </div>
-              <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300 cursor-pointer font-medium">
-                <input
-                  type="checkbox"
-                  checked={includeClearing}
-                  onChange={(e) => setIncludeClearing(e.target.checked)}
-                  className="rounded bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 text-amber-500 focus:ring-0 w-4 h-4"
-                />
-                <span>Include Nigeria Customs Clearance</span>
-              </label>
-            </div>
-
-            {includeClearing && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-50 dark:bg-slate-950/40 p-4 rounded-xl border border-slate-200 dark:border-slate-800/60 shadow-inner">
-                <div>
-                  <label className="block text-xs font-mono text-slate-600 dark:text-slate-400 mb-1 font-medium">
-                    Declared Commercial Invoice Value (USD)
-                  </label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-2.5 text-xs text-slate-400">$</span>
-                    <input
-                      type="number"
-                      min="100"
-                      step="50"
-                      value={invoiceValueUsd}
-                      onChange={(e) => setInvoiceValueUsd(Math.max(0, Number(e.target.value)))}
-                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg pl-7 pr-3 py-2 text-sm text-slate-800 dark:text-slate-200 focus:outline-none focus:border-amber-500 font-mono shadow-sm dark:shadow-none"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-mono text-slate-600 dark:text-slate-400 mb-1 font-medium">
-                    Customs HS Duty Tariff Bracket
-                  </label>
-                  <select
-                    value={dutyBracket}
-                    onChange={(e) => setDutyBracket(Number(e.target.value))}
-                    className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-800 dark:text-slate-200 focus:outline-none focus:border-amber-500 font-mono shadow-sm dark:shadow-none"
-                  >
-                    <option value={0.05}>5% - Capital Goods, Heavy Machinery & Raw Materials</option>
-                    <option value={0.10}>10% - Intermediate Industrial Supplies & Parts</option>
-                    <option value={0.20}>20% - Finished Consumer & Retail Goods</option>
-                  </select>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Operational ROI Banner */}
-          <div className="bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 rounded-xl p-3 flex items-center justify-between text-xs text-amber-800 dark:text-amber-300">
-            <div className="flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
-              <span>
-                <strong>Desk Automation Impact:</strong> Replaces ~45 daily manual WhatsApp voice notes with self-serve instant quotations.
+          {/* Quantity Slider */}
+          <div className="border-2 border-black dark:border-zinc-800 p-4 bg-slate-50 dark:bg-zinc-900 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-black/10 dark:border-zinc-800 pb-2">
+              <span className="text-xs uppercase tracking-widest text-amber-600 dark:text-amber-400 font-black">
+                {freightType === 'air' ? '02 // Consignment Gross Weight' : '02 // Consignment Volume (CBM)'}
               </span>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min={freightType === 'air' ? 5 : 0.5}
+                  max={freightType === 'air' ? 1000 : 65}
+                  step={freightType === 'air' ? 5 : 0.5}
+                  value={freightType === 'air' ? weightKg : volumeCbm}
+                  onChange={(e) => {
+                    const val = Number(e.target.value);
+                    if (freightType === 'air') setWeightKg(Math.max(1, val));
+                    else setVolumeCbm(Math.max(0.1, val));
+                  }}
+                  className="w-24 min-h-[44px] bg-white dark:bg-black border-2 border-black dark:border-zinc-700 px-3 py-1 text-center font-mono text-sm font-bold text-slate-900 dark:text-white"
+                />
+                <span className="text-xs font-bold uppercase">{freightType === 'air' ? 'KG Gross' : 'CBM Vol'}</span>
+              </div>
             </div>
-            <span className="font-mono bg-amber-200/60 dark:bg-amber-500/20 px-2 py-0.5 rounded text-amber-900 dark:text-amber-200 text-[11px] shrink-0 ml-2 font-bold">
-              +{company.estimatedMonthlyHoursLost} hrs/mo saved
-            </span>
+
+            <input
+              type="range"
+              min={freightType === 'air' ? 5 : 0.5}
+              max={freightType === 'air' ? 500 : 40}
+              step={freightType === 'air' ? 5 : 0.5}
+              value={freightType === 'air' ? weightKg : volumeCbm}
+              onChange={(e) => {
+                const val = Number(e.target.value);
+                if (freightType === 'air') setWeightKg(val);
+                else setVolumeCbm(val);
+              }}
+              className="w-full accent-amber-500 cursor-pointer h-3 bg-slate-300 dark:bg-zinc-800 border border-black dark:border-zinc-700 appearance-none"
+            />
+          </div>
+
+          {/* Customs Tariff Matrix (Horizontal Scrollable) */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs uppercase tracking-widest text-amber-600 dark:text-amber-400 font-black">
+                Customs Tariff Formulations
+              </span>
+              <button
+                type="button"
+                onClick={() => setIncludeClearing(!includeClearing)}
+                className={`text-xs px-2.5 py-1 border font-bold uppercase cursor-pointer ${
+                  includeClearing ? 'bg-emerald-600 text-white border-black' : 'bg-slate-200 text-slate-700 border-slate-400'
+                }`}
+              >
+                {includeClearing ? '✓ Clearing Included' : 'Freight Only'}
+              </button>
+            </div>
+            <div className="w-full overflow-x-auto border-2 border-black dark:border-zinc-800">
+              <table className="w-full min-w-max text-left text-xs font-mono">
+                <thead className="bg-slate-100 dark:bg-zinc-900 text-slate-700 dark:text-zinc-300 uppercase text-[10px] border-b border-black dark:border-zinc-800">
+                  <tr>
+                    <th className="p-2.5">Statutory Surcharge</th>
+                    <th className="p-2.5 text-center">NCS Tariff Rate</th>
+                    <th className="p-2.5 text-right">Estimated Cost (₦)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-zinc-900 text-slate-800 dark:text-zinc-200">
+                  <tr>
+                    <td className="p-2.5">Customs Statutory Import Duty</td>
+                    <td className="p-2.5 text-center font-bold">10.0% of CIF</td>
+                    <td className="p-2.5 text-right tabular-nums font-bold">{formatNgn(customsDutyNgn)}</td>
+                  </tr>
+                  <tr>
+                    <td className="p-2.5">Comprehensive Import Supervision (CISS)</td>
+                    <td className="p-2.5 text-center">1.0% FOB</td>
+                    <td className="p-2.5 text-right tabular-nums">{formatNgn(cissNgn)}</td>
+                  </tr>
+                  <tr>
+                    <td className="p-2.5">ECOWAS Trade Liberalization (ETLS)</td>
+                    <td className="p-2.5 text-center">0.5% CIF</td>
+                    <td className="p-2.5 text-right tabular-nums">{formatNgn(etlsNgn)}</td>
+                  </tr>
+                  <tr>
+                    <td className="p-2.5">Port Development Surcharge</td>
+                    <td className="p-2.5 text-center">7.0% of Duty</td>
+                    <td className="p-2.5 text-right tabular-nums">{formatNgn(portLevyNgn)}</td>
+                  </tr>
+                  <tr>
+                    <td className="p-2.5">Federal Import VAT</td>
+                    <td className="p-2.5 text-center">7.5% Tax</td>
+                    <td className="p-2.5 text-right tabular-nums">{formatNgn(vatNgn)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
 
         </div>
 
-        {/* Right Column: Live Quotation Summary Card & WhatsApp Dispatch (5 cols) */}
+        {/* Right Column: Formal Quote Card & WhatsApp Dispatch (5 cols) */}
         <div className="lg:col-span-5 space-y-4">
-          <div className="bg-white dark:bg-gradient-to-b dark:from-slate-900 dark:via-slate-900 dark:to-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-xl dark:shadow-2xl relative overflow-hidden transition-colors duration-200">
+          <div className="bg-white dark:bg-zinc-950 border-2 border-black dark:border-zinc-800 p-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.1)] relative">
             
-            {/* Ambient background glow */}
-            <div className="absolute top-0 right-0 w-48 h-48 bg-amber-500/5 rounded-full blur-3xl -z-0" />
-
-            <div className="relative z-10 space-y-5">
+            <div className="space-y-5">
               
               {/* Header */}
-              <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800">
+              <div className="flex items-center justify-between pb-3 border-b-2 border-black dark:border-zinc-800">
                 <div>
-                  <span className="text-[10px] font-mono uppercase tracking-widest text-slate-500 dark:text-slate-400 font-semibold">Formal Quotation</span>
-                  <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                    {company.name} Desk Estimate
+                  <span className="text-xs uppercase tracking-widest text-amber-600 dark:text-amber-400 font-black">
+                    Official Freight Quotation
+                  </span>
+                  <h3 className="text-lg font-black uppercase text-slate-900 dark:text-white">
+                    {company.name} Desk
                   </h3>
                 </div>
 
                 {/* Currency Switcher */}
-                <div className="flex p-0.5 bg-slate-100 dark:bg-slate-950 rounded border border-slate-200 dark:border-slate-800 text-[11px] font-mono">
+                <div className="flex border border-black dark:border-zinc-700">
                   <button
+                    type="button"
                     onClick={() => setCurrencyView('NGN')}
-                    className={`px-2 py-1 rounded transition-colors ${
-                      currencyView === 'NGN' 
-                        ? 'bg-amber-500 text-slate-950 font-bold shadow-sm' 
-                        : 'text-slate-600 dark:text-slate-400'
+                    className={`px-3 py-1 text-xs font-bold ${
+                      currencyView === 'NGN' ? 'bg-amber-500 text-black font-black' : 'bg-slate-100 text-slate-700 dark:bg-zinc-900 dark:text-zinc-300'
                     }`}
                   >
-                    NGN (₦)
+                    NGN
                   </button>
                   <button
+                    type="button"
                     onClick={() => setCurrencyView('USD')}
-                    className={`px-2 py-1 rounded transition-colors ${
-                      currencyView === 'USD' 
-                        ? 'bg-amber-500 text-slate-950 font-bold shadow-sm' 
-                        : 'text-slate-600 dark:text-slate-400'
+                    className={`px-3 py-1 text-xs font-bold ${
+                      currencyView === 'USD' ? 'bg-amber-500 text-black font-black' : 'bg-slate-100 text-slate-700 dark:bg-zinc-900 dark:text-zinc-300'
                     }`}
                   >
-                    USD ($)
+                    USD
                   </button>
                 </div>
               </div>
 
-              {/* Shipment Metrics Strip */}
-              <div className="grid grid-cols-2 gap-2 text-xs font-mono bg-slate-50 dark:bg-slate-950/70 p-3 rounded-xl border border-slate-200 dark:border-slate-800/80 shadow-sm dark:shadow-none">
-                <div>
-                  <span className="text-slate-500 block text-[10px] uppercase">Service Type</span>
-                  <span className="text-slate-800 dark:text-slate-200 font-semibold uppercase">{freightType} Forwarding</span>
-                </div>
-                <div>
-                  <span className="text-slate-500 block text-[10px] uppercase">Billable Quantity</span>
-                  <span className="text-amber-700 dark:text-amber-400 font-bold">
-                    {freightType === 'air' ? `${weightKg} KG Gross` : `${volumeCbm} CBM`}
-                  </span>
-                </div>
-                <div className="col-span-2 pt-1 border-t border-slate-200 dark:border-slate-800/60 flex items-center justify-between">
-                  <span className="text-slate-500 text-[10px] uppercase">Transit Corridor</span>
-                  <span className="text-slate-700 dark:text-slate-300 text-[11px] truncate max-w-[220px]">
-                    {origin.split(' ')[0]} ➔ {destination.split(' ')[0]}
-                  </span>
-                </div>
-              </div>
-
-              {/* Financial Itemization */}
-              <div className="space-y-2.5 text-sm">
-                <div className="flex justify-between items-center text-slate-700 dark:text-slate-300">
-                  <span className="text-xs text-slate-500 dark:text-slate-400">Core International Freight</span>
-                  <span className="font-mono font-medium tabular-nums text-slate-900 dark:text-slate-100">
+              {/* Price Breakdown */}
+              <div className="space-y-3 text-sm">
+                <div className="flex justify-between items-center text-slate-700 dark:text-zinc-300">
+                  <div>
+                    <span className="text-xs text-slate-500 block">Core Freight ({freightType.toUpperCase()})</span>
+                    <span className="text-[11px] text-slate-400 font-sans">{origin.split('(')[0]} ➔ Lagos</span>
+                  </div>
+                  <span className="font-mono font-bold tabular-nums text-slate-900 dark:text-white">
                     {currencyView === 'NGN' ? formatNgn(freightCostNgn) : formatUsd(freightCostUsd)}
                   </span>
                 </div>
 
-                <div className="flex justify-between items-center text-slate-700 dark:text-slate-300">
-                  <span className="text-xs text-slate-500 dark:text-slate-400">Lagos Handling & Cargo Dues</span>
-                  <span className="font-mono font-medium tabular-nums text-slate-900 dark:text-slate-100">
+                <div className="flex justify-between items-center text-slate-700 dark:text-zinc-300">
+                  <div>
+                    <span className="text-xs text-slate-500 block">Terminal Dues & Security</span>
+                    <span className="text-[11px] text-slate-400 font-sans">Lagos Airport/Port tally</span>
+                  </div>
+                  <span className="font-mono font-bold tabular-nums text-slate-900 dark:text-white">
                     {currencyView === 'NGN' ? formatNgn(handlingFeeNgn) : formatUsd(handlingFeeNgn / exchangeRate)}
                   </span>
                 </div>
 
                 {includeClearing && (
-                  <>
-                    <div className="flex justify-between items-center text-slate-700 dark:text-slate-300 pt-2 border-t border-slate-200 dark:border-slate-800/50">
-                      <span className="text-xs text-slate-500 dark:text-slate-400">Customs Statutory Duty ({(dutyBracket * 100)}%)</span>
-                      <span className="font-mono font-medium tabular-nums text-slate-900 dark:text-slate-300">
-                        {currencyView === 'NGN' ? formatNgn(customsDutyNgn) : formatUsd(customsDutyNgn / exchangeRate)}
-                      </span>
+                  <div className="flex justify-between items-center text-slate-700 dark:text-zinc-300 pt-2 border-t border-slate-200 dark:border-zinc-800">
+                    <div>
+                      <span className="text-xs text-slate-500 block">Nigeria Customs Statutory Clearing</span>
+                      <span className="text-[11px] text-slate-400 font-sans">Duty + Surcharges + VAT</span>
                     </div>
-
-                    <div className="flex justify-between items-center text-slate-700 dark:text-slate-300">
-                      <span className="text-xs text-slate-500 dark:text-slate-400">Port Surcharges (CISS + ETLS + Port)</span>
-                      <span className="font-mono font-medium tabular-nums text-slate-600 dark:text-slate-400">
-                        {currencyView === 'NGN' ? formatNgn(cissNgn + etlsNgn + portLevyNgn) : formatUsd((cissNgn + etlsNgn + portLevyNgn) / exchangeRate)}
-                      </span>
-                    </div>
-
-                    <div className="flex justify-between items-center text-slate-700 dark:text-slate-300">
-                      <span className="text-xs text-slate-500 dark:text-slate-400">Import VAT (7.5%) & PAAR Handling</span>
-                      <span className="font-mono font-medium tabular-nums text-slate-600 dark:text-slate-400">
-                        {currencyView === 'NGN' ? formatNgn(vatNgn + clearanceAdminFeeNgn) : formatUsd((vatNgn + clearanceAdminFeeNgn) / exchangeRate)}
-                      </span>
-                    </div>
-                  </>
+                    <span className="font-mono font-bold tabular-nums text-slate-900 dark:text-white">
+                      {currencyView === 'NGN' ? formatNgn(totalClearingNgn) : formatUsd(totalClearingNgn / exchangeRate)}
+                    </span>
+                  </div>
                 )}
               </div>
 
               {/* Total Landed Cost Card */}
-              <div className="bg-slate-50 dark:bg-slate-950 border-2 border-amber-500/40 rounded-xl p-4 space-y-1 shadow-sm">
-                <span className="text-[11px] font-mono text-amber-700 dark:text-amber-400 uppercase tracking-wider block font-bold">
+              <div className="bg-slate-50 dark:bg-black border-2 border-black dark:border-amber-500 p-4 space-y-1">
+                <span className="text-xs uppercase tracking-wider font-bold text-amber-600 dark:text-amber-400 block">
                   Total Landed Cost Estimate
                 </span>
-                <div className="flex items-baseline justify-between">
-                  <span className="text-2xl font-black text-slate-900 dark:text-white font-mono tabular-nums tracking-tight">
-                    {currencyView === 'NGN' ? formatNgn(totalLandedCostNgn) : formatUsd(totalLandedCostUsd)}
-                  </span>
-                  <span className="text-xs text-slate-500 dark:text-slate-400 font-mono">
-                    {currencyView === 'NGN' ? `~${formatUsd(totalLandedCostUsd)}` : `~${formatNgn(totalLandedCostNgn)}`}
-                  </span>
+                <div className="text-3xl font-black text-slate-900 dark:text-white font-mono tabular-nums tracking-tight">
+                  {currencyView === 'NGN' ? formatNgn(totalLandedCostNgn) : formatUsd(totalLandedCostUsd)}
                 </div>
-                <p className="text-[10px] text-slate-500 pt-1">
-                  *Includes documentation, clearance and terminal consolidation handling.
+                <p className="text-[10px] text-slate-500 pt-1 font-sans">
+                  *Official FX rate locked at ₦{exchangeRate}/$ for active session.
                 </p>
               </div>
 
-              {/* WhatsApp & Proforma Actions */}
+              {/* Action Buttons (All min-h-[44px]) */}
               <div className="space-y-2 pt-2">
                 <a
                   href={whatsappUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-2 text-sm shadow-lg shadow-emerald-950/20 dark:shadow-emerald-950/40 transition-all group"
+                  className="w-full min-h-[48px] bg-emerald-600 hover:bg-emerald-500 text-white font-black py-3 px-4 flex items-center justify-center gap-2 text-xs uppercase tracking-wider transition-all shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5"
                 >
-                  <Send className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
+                  <Send className="w-4 h-4" />
                   <span>Dispatch Booking via WhatsApp</span>
                   <ExternalLink className="w-3.5 h-3.5 opacity-70 ml-1" />
                 </a>
 
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <button
                     type="button"
                     onClick={() => setIsWhatsAppSimOpen(true)}
-                    className="bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-semibold py-2.5 px-3 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-center gap-1.5 transition-colors shadow-sm"
+                    className="min-h-[44px] bg-slate-100 hover:bg-slate-200 dark:bg-zinc-900 dark:hover:bg-zinc-800 text-slate-900 dark:text-white text-xs font-bold py-2.5 px-3 border border-black dark:border-zinc-700 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
                   >
-                    <Smartphone className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                    <span>Test in Simulator</span>
+                    <Smartphone className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                    <span>WhatsApp Simulator</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setIsInvoiceOpen(true)}
-                    className="bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-semibold py-2.5 px-3 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-center gap-1.5 transition-colors shadow-sm"
+                    className="min-h-[44px] bg-slate-100 hover:bg-slate-200 dark:bg-zinc-900 dark:hover:bg-zinc-800 text-slate-900 dark:text-white text-xs font-bold py-2.5 px-3 border border-black dark:border-zinc-700 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
                   >
-                    <Printer className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                    <Printer className="w-4 h-4 text-amber-600 dark:text-amber-400" />
                     <span>Proforma PDF</span>
                   </button>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={handleCopy}
-                  className="w-full bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400 font-mono text-xs py-2 px-4 rounded-xl flex items-center justify-center gap-2 border border-slate-200 dark:border-slate-800 transition-colors"
-                >
-                  {copied ? (
-                    <>
-                      <Check className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                      <span className="text-emerald-700 dark:text-emerald-400 font-semibold">Booking Payload Copied!</span>
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="w-4 h-4 text-slate-400" />
-                      <span>Copy Raw WhatsApp Payload</span>
-                    </>
-                  )}
-                </button>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={handleCopyShareLink}
+                    className="min-h-[44px] bg-slate-100 hover:bg-slate-200 dark:bg-zinc-900 dark:hover:bg-zinc-800 text-slate-900 dark:text-white font-mono text-xs font-bold py-2.5 px-3 border border-black dark:border-zinc-700 flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                  >
+                    {copiedLink ? (
+                      <>
+                        <Check className="w-4 h-4 text-emerald-600" />
+                        <span className="text-emerald-700 dark:text-emerald-400">Link Copied!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Link2 className="w-4 h-4 text-slate-600 dark:text-zinc-400" />
+                        <span>Copy Quote Link</span>
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleCopy}
+                    className="min-h-[44px] bg-slate-100 hover:bg-slate-200 dark:bg-zinc-900 dark:hover:bg-zinc-800 text-slate-900 dark:text-white font-mono text-xs font-bold py-2.5 px-3 border border-black dark:border-zinc-700 flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                  >
+                    {copied ? (
+                      <>
+                        <Check className="w-4 h-4 text-emerald-600" />
+                        <span className="text-emerald-700 dark:text-emerald-400">Payload Copied!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-4 h-4 text-slate-600 dark:text-zinc-400" />
+                        <span>Copy Raw Payload</span>
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
 
               {/* Desk Information Footer */}
-              <div className="pt-3 border-t border-slate-200 dark:border-slate-800/80 text-[11px] text-slate-500 flex items-center justify-between">
+              <div className="pt-3 border-t border-black/10 dark:border-zinc-800 text-xs text-slate-500 flex items-center justify-between">
                 <span className="flex items-center gap-1.5">
-                  <MapPin className="w-3 h-3 text-slate-400" />
+                  <MapPin className="w-3.5 h-3.5 text-slate-400" />
                   {company.location}
                 </span>
-                <span className="font-mono text-slate-500 dark:text-slate-400">Active Rate Session</span>
+                <span className="font-mono text-amber-600 dark:text-amber-400 font-bold uppercase">
+                  Rate Engine Active
+                </span>
               </div>
 
             </div>

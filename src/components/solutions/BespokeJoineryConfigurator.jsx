@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Hammer, 
   Layers, 
@@ -17,10 +17,12 @@ import {
   Compass,
   MapPin,
   Smartphone,
-  Printer
+  Printer,
+  Link2
 } from 'lucide-react';
 import WhatsAppSimulatorModal from '../common/WhatsAppSimulatorModal';
 import ProformaInvoiceModal from '../common/ProformaInvoiceModal';
+import { getHashParams, updateHashParams, buildShareUrl } from '../../utils/urlState';
 
 export default function BespokeJoineryConfigurator({ company }) {
   const custom = company?.customMetrics || {
@@ -32,24 +34,12 @@ export default function BespokeJoineryConfigurator({ company }) {
     minProjectThresholdNgn: 3500000
   };
 
-  // State
-  const [projectType, setProjectType] = useState('kitchen');
-  const [substrateTier, setSubstrateTier] = useState('hmr'); // 'egger' | 'hmr' | 'teak'
-  const [hardwareTier, setHardwareTier] = useState('blum'); // 'dtc' | 'blum'
-  const [linearMeters, setLinearMeters] = useState(8.5);
-  const [ceilingHeightMeters, setCeilingHeightMeters] = useState(2.8);
-  const [haulageZone, setHaulageZone] = useState('island'); // 'island' | 'mainland' | 'outskirts'
-  const [valueEngineeringActive, setValueEngineeringActive] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [isWhatsAppSimOpen, setIsWhatsAppSimOpen] = useState(false);
-  const [isInvoiceOpen, setIsInvoiceOpen] = useState(false);
-
   // Project Type Presets
   const projectCatalog = {
     kitchen: {
       name: 'Luxury Island Chef’s Kitchen',
       baseRatePerMeter: 380000,
-      boardUsageFactor: 2.4, // boards per linear meter
+      boardUsageFactor: 2.4,
       hardwareUnits: 14,
       desc: 'Double-sided island, concealed pantry cabinets & soft-close drawer stacks.'
     },
@@ -127,79 +117,107 @@ export default function BespokeJoineryConfigurator({ company }) {
     }
   };
 
-  const selectedProject = projectCatalog[projectType];
-  const effectiveSubstrate = valueEngineeringActive && substrateTier === 'teak' 
-    ? 'hmr' 
-    : substrateTier;
-  const currentSubstrate = substrates[effectiveSubstrate];
-  const effectiveHardwareTier = valueEngineeringActive && hardwareTier === 'blum'
-    ? 'dtc'
-    : hardwareTier;
+  // Read initial configuration from URL params for persistent state
+  const initialParams = getHashParams();
 
-  // Board Yield Calculations (4x8ft = 1.22m x 2.44m = 2.97 sqm)
-  const rawBoardsNeeded = linearMeters * selectedProject.boardUsageFactor;
-  const wasteFactor = custom.wasteFactor || 0.15; // 15% fabrication drop-off
-  const grossBoardsWithWaste = Math.ceil(rawBoardsNeeded * (1 + wasteFactor));
-  const edgeBandingMeters = Math.round(linearMeters * 18.5); // Average ABS edge banding run
+  // State
+  const [projectType, setProjectType] = useState(
+    initialParams.project && projectCatalog[initialParams.project] ? initialParams.project : 'kitchen'
+  );
+  const [substrateTier, setSubstrateTier] = useState(
+    initialParams.material && substrates[initialParams.material] ? initialParams.material : 'hmr'
+  );
+  const [hardwareTier, setHardwareTier] = useState(
+    initialParams.hardware === 'dtc' ? 'dtc' : 'blum'
+  );
+  const [linearMeters, setLinearMeters] = useState(
+    initialParams.meters ? Math.max(2, Math.min(40, Number(initialParams.meters))) : 8.5
+  );
+  const [haulageZone, setHaulageZone] = useState(
+    initialParams.haulage && haulageZones[initialParams.haulage] ? initialParams.haulage : 'island'
+  );
+  const [valueEngineeringActive, setValueEngineeringActive] = useState(
+    initialParams.ve === '1'
+  );
 
-  // Mathematical Costing in NGN
-  const boardCostPerUnit = custom.baseBoardCostNgn || 42000;
-  const substrateMaterialsCost = grossBoardsWithWaste * (boardCostPerUnit * currentSubstrate.mult);
+  const [copied, setCopied] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
+  const [isWhatsAppSimOpen, setIsWhatsAppSimOpen] = useState(false);
+  const [isInvoiceOpen, setIsInvoiceOpen] = useState(false);
+
+  // Sync state to URL hash query parameters on change
+  useEffect(() => {
+    updateHashParams({
+      project: projectType,
+      material: substrateTier,
+      hardware: hardwareTier,
+      meters: linearMeters,
+      haulage: haulageZone,
+      ve: valueEngineeringActive ? '1' : undefined
+    }, company?.slug);
+  }, [projectType, substrateTier, hardwareTier, linearMeters, haulageZone, valueEngineeringActive, company?.slug]);
+
+  const selectedProject = projectCatalog[projectType] || projectCatalog.kitchen;
+  const currentSubstrate = substrates[substrateTier] || substrates.hmr;
+  const zoneInfo = haulageZones[haulageZone] || haulageZones.island;
+
+  // Value Engineering Effect
+  const effectiveSubstrate = valueEngineeringActive && substrateTier !== 'egger' ? substrates.egger : currentSubstrate;
+  const effectiveHardwareTier = valueEngineeringActive ? 'dtc' : hardwareTier;
+
+  // Board Yield & Waste Calculation
+  const netBoardsRequired = Math.ceil(linearMeters * selectedProject.boardUsageFactor);
+  const wasteFactor = custom.wasteFactor || 0.15;
+  const grossBoardsWithWaste = Math.ceil(netBoardsRequired * (1 + wasteFactor));
+  const edgeBandingMeters = Math.round(grossBoardsWithWaste * 18.5);
+
+  // Financial Costing (in NGN)
+  const baseBoardCost = custom.baseBoardCostNgn || 42000;
+  const substrateMaterialsCost = grossBoardsWithWaste * (baseBoardCost * effectiveSubstrate.mult);
   
-  // Hardware Costing
-  const baseHardwareCost = selectedProject.hardwareUnits * 18500;
-  const hardwareMultiplier = effectiveHardwareTier === 'blum' ? (1 + (custom.blumHardwarePremium || 0.32)) : 1.0;
-  const totalHardwareCost = baseHardwareCost * hardwareMultiplier;
+  const blumHardwareCost = selectedProject.hardwareUnits * 24500;
+  const dtcHardwareCost = selectedProject.hardwareUnits * 16800;
+  const totalHardwareCost = effectiveHardwareTier === 'blum' ? blumHardwareCost : dtcHardwareCost;
 
-  // Fabrication & Joinery Precision Labor
-  const joineryLaborCost = linearMeters * (selectedProject.baseRatePerMeter * 0.42);
-
-  // Finishing & Edge Banding
+  const joineryLaborCost = linearMeters * 65000;
   const edgeBandingCost = edgeBandingMeters * 1200;
-
-  // Haulage & Installation
-  const zoneInfo = haulageZones[haulageZone];
   const logisticsTotal = zoneInfo.cost + zoneInfo.hoistingCharge;
 
-  // Subtotal & Full Estimate
   const totalProductionCostNgn = substrateMaterialsCost + totalHardwareCost + joineryLaborCost + edgeBandingCost + logisticsTotal;
 
-  // Un-engineered comparison value to show VE savings
-  const unengineeredCostNgn = rawBoardsNeeded * (1 + wasteFactor) * (boardCostPerUnit * substrates[substrateTier].mult)
-    + (selectedProject.hardwareUnits * 18500 * (hardwareTier === 'blum' ? 1.32 : 1.0))
-    + joineryLaborCost + edgeBandingCost + logisticsTotal;
-  
-  const veSavingsNgn = Math.max(0, unengineeredCostNgn - totalProductionCostNgn);
-  const veSavingsPct = unengineeredCostNgn > 0 ? Math.round((veSavingsNgn / unengineeredCostNgn) * 100) : 0;
+  // Standard Non-VE Cost (for savings comparison)
+  const standardSubstrateCost = grossBoardsWithWaste * (baseBoardCost * currentSubstrate.mult);
+  const standardHardwareCost = hardwareTier === 'blum' ? blumHardwareCost : dtcHardwareCost;
+  const standardCostNgn = standardSubstrateCost + standardHardwareCost + joineryLaborCost + edgeBandingCost + logisticsTotal;
+  const veSavingsNgn = Math.max(0, standardCostNgn - totalProductionCostNgn);
+  const veSavingsPct = standardCostNgn > 0 ? Math.round((veSavingsNgn / standardCostNgn) * 100) : 0;
 
-  // Threshold verification
+  // Minimum Project Threshold Check (₦3,500,000)
   const thresholdNgn = custom.minProjectThresholdNgn || 3500000;
   const meetsThreshold = totalProductionCostNgn >= thresholdNgn;
 
   const formatNgn = (val) => `₦${Math.round(val).toLocaleString()}`;
 
-  // WhatsApp spec card payload
-  const whatsappBoqText = `*ARCHITECTURAL SPECIFICATION & BOQ // ${company.name.toUpperCase()}*
+  // WhatsApp BOQ Payload
+  const whatsappBoqText = `*BESPOKE JOINERY SPECIFIER BOQ // ${company.name.toUpperCase()}*
 ---------------------------------------
-• Project Scope: ${selectedProject.name}
-• Run Length: ${linearMeters} Linear Meters (${ceilingHeightMeters}m Height)
-• Substrate Core: ${currentSubstrate.name} (${currentSubstrate.tag})
-• Hardware Specification: ${effectiveHardwareTier === 'blum' ? 'Blum Tandembox / Aventos HF Soft-Close' : 'Heavy-Duty DTC Engineered Soft-Close'}
-• Board Yield: ${grossBoardsWithWaste} Panels (incl. 15% fabrication wastage)
-• Edge-Banding ABS: ${edgeBandingMeters} Meters
-• Delivery Corridor: ${zoneInfo.name}
-${valueEngineeringActive ? `• Value-Engineering: APPLIED (₦${Math.round(veSavingsNgn).toLocaleString()} Saved)\n` : ''}---------------------------------------
+• Project Class: ${selectedProject.name}
+• Scale: ${linearMeters} Linear Meters (${grossBoardsWithWaste} Panels 4x8ft with 15% Wastage)
+• Specified Core: ${effectiveSubstrate.name} (${effectiveSubstrate.tag})
+• Hardware Suite: ${effectiveHardwareTier === 'blum' ? 'BLUM Austria Soft-Close Tandembox' : 'Heavy-Duty DTC Concealed Slides'}
+• Haulage Zone: ${zoneInfo.name.split('(')[0]} (Includes Site Hoisting)
+${valueEngineeringActive ? `• Value-Engineering: ACTIVE (Saved ${formatNgn(veSavingsNgn)} / ${veSavingsPct}%)\n` : ''}---------------------------------------
 *ESTIMATED PRODUCTION & FIT-OUT BUDGET:*
-• Substrate Core Materials: ${formatNgn(substrateMaterialsCost)}
-• Precision Motion Hardware: ${formatNgn(totalHardwareCost)}
-• Joinery & CNC Milling Labor: ${formatNgn(joineryLaborCost)}
-• ABS Edge-Banding: ${formatNgn(edgeBandingCost)}
-• Lagos Haulage & Hoisting: ${formatNgn(logisticsTotal)}
+• Substrate Materials (${grossBoardsWithWaste} bds): ${formatNgn(substrateMaterialsCost)}
+• Hardware Package (${selectedProject.hardwareUnits} units): ${formatNgn(totalHardwareCost)}
+• CNC Joinery Fabrication: ${formatNgn(joineryLaborCost)}
+• 2.0mm ABS Edge-Banding (${edgeBandingMeters}m): ${formatNgn(edgeBandingCost)}
+• Site Logistics & Hoisting: ${formatNgn(logisticsTotal)}
 ---------------------------------------
-*TOTAL PROJECT ESTIMATE: ${formatNgn(totalProductionCostNgn)}*
-${meetsThreshold ? '✅ Tier Status: VIP SPECIFIER RUN (>₦3.5M)' : '⚠️ Note: Below standard custom fabrication gate (₦3.5M)'}
+*TOTAL ESTIMATED PROJECT VALUE: ${formatNgn(totalProductionCostNgn)}*
+${meetsThreshold ? '✅ Meets Minimum Production Threshold (₦3.5M)' : '⚠️ Below ₦3.5M Studio Minimum'}
 ---------------------------------------
-Generated via ${company.name} Bespoke Joinery Configurator. Requesting factory consultation & site survey.`;
+Generated via ${company.name} Live Intake Engine. Please review BOQ and confirm site assessment schedule.`;
 
   const handleCopy = () => {
     navigator.clipboard.writeText(whatsappBoqText);
@@ -207,26 +225,40 @@ Generated via ${company.name} Bespoke Joinery Configurator. Requesting factory c
     setTimeout(() => setCopied(false), 2200);
   };
 
-  const phoneTarget = company.samplePhone || '2348021122334';
+  const handleCopyShareLink = () => {
+    const shareUrl = buildShareUrl(company.slug, {
+      project: projectType,
+      material: substrateTier,
+      hardware: hardwareTier,
+      meters: linearMeters,
+      haulage: haulageZone,
+      ve: valueEngineeringActive ? '1' : undefined
+    });
+    navigator.clipboard.writeText(shareUrl);
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2200);
+  };
+
+  const phoneTarget = company.samplePhone || '2348033045612';
   const whatsappUrl = `https://wa.me/${phoneTarget}?text=${encodeURIComponent(whatsappBoqText)}`;
 
   const invoiceData = {
-    title: `${selectedProject.name} Specification & BOQ`,
-    subtitle: `Substrate: ${currentSubstrate.name} • Hardware: ${effectiveHardwareTier.toUpperCase()}`,
-    subtotal: substrateMaterialsCost + totalHardwareCost + joineryLaborCost + edgeBandingCost,
-    surcharges: zoneInfo.cost + zoneInfo.hoistingCharge,
+    title: `${selectedProject.name} Joinery Specification BOQ`,
+    subtitle: `Substrate: ${effectiveSubstrate.name} • ${linearMeters}m Run • ${effectiveHardwareTier.toUpperCase()} Motion`,
+    subtotal: totalProductionCostNgn,
+    surcharges: logisticsTotal,
     vat: Math.round(totalProductionCostNgn * 0.075),
     total: totalProductionCostNgn + Math.round(totalProductionCostNgn * 0.075),
     items: [
       {
-        name: `Core Millwork Substrate Panels (${currentSubstrate.name})`,
-        desc: `${grossBoardsWithWaste} Panels (incl. 15% fabrication wastage factor) for ${linearMeters}m run`,
+        name: `Core Substrate Material: ${effectiveSubstrate.name}`,
+        desc: `${grossBoardsWithWaste}x 4x8ft Panels with 15% wastage allowance (${effectiveSubstrate.tag})`,
         qty: `${grossBoardsWithWaste} Boards`,
-        rate: boardCostPerUnit * currentSubstrate.mult,
+        rate: Math.round(substrateMaterialsCost / grossBoardsWithWaste),
         total: substrateMaterialsCost
       },
       {
-        name: `Precision Damped Motion Hardware (${effectiveHardwareTier.toUpperCase()})`,
+        name: `Hardware Suite: ${effectiveHardwareTier === 'blum' ? 'Blum Austria' : 'Heavy-Duty DTC'}`,
         desc: `${selectedProject.hardwareUnits} Pairs/Units (Hinges, Tandembox runners & lifts)`,
         qty: `${selectedProject.hardwareUnits} Units`,
         rate: Math.round(totalHardwareCost / selectedProject.hardwareUnits),
@@ -257,57 +289,83 @@ Generated via ${company.name} Bespoke Joinery Configurator. Requesting factory c
   };
 
   return (
-    <div className="w-full max-w-7xl mx-auto space-y-6">
+    <div className="w-full max-w-7xl mx-auto space-y-6 font-mono text-slate-900 dark:text-slate-100">
       
-      {/* Top Banner: Value Engineering & Minimum Production Threshold */}
-      <div className="bg-amber-50/70 dark:bg-gradient-to-r dark:from-stone-900 dark:via-amber-950/30 dark:to-stone-900 border border-amber-200 dark:border-amber-900/40 rounded-xl p-4 flex flex-col md:flex-row items-center justify-between gap-4 transition-colors duration-200 shadow-sm dark:shadow-none">
+      {/* Top Banner: Value Engineering & Minimum Production Threshold (Brutalist) */}
+      <div className="bg-white dark:bg-zinc-950 border-2 border-black dark:border-zinc-800 p-4 sm:p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.1)]">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-amber-500/10 border border-amber-600/30 flex items-center justify-center text-amber-600 dark:text-amber-500">
-            <Compass className="w-5 h-5" />
+          <div className="w-11 h-11 bg-black text-amber-400 dark:bg-amber-500 dark:text-black flex items-center justify-center font-black shrink-0">
+            <Compass className="w-6 h-6" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-mono uppercase tracking-wider text-amber-700 dark:text-amber-400 font-semibold">Architectural Millwork Portal</span>
-              <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${
-                meetsThreshold ? 'bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-500/20 dark:text-emerald-300 dark:border-emerald-500/40' : 'bg-amber-50 text-amber-800 border-amber-300 dark:bg-amber-500/20 dark:text-amber-300 dark:border-amber-500/40'
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs uppercase tracking-widest text-amber-600 dark:text-amber-400 font-black">
+                Architectural Millwork Engine
+              </span>
+              <span className={`text-[11px] px-2 py-0.5 border font-bold uppercase ${
+                meetsThreshold 
+                  ? 'bg-emerald-100 text-emerald-900 border-emerald-500 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-500' 
+                  : 'bg-amber-100 text-amber-900 border-amber-500 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-500'
               }`}>
-                {meetsThreshold ? 'Passed ₦3.5M Gate' : 'Under ₦3.5M Minimum'}
+                {meetsThreshold ? 'Passed ₦3.5M Qualification Gate' : 'Below ₦3.5M Minimum Studio Spec'}
               </span>
             </div>
-            <p className="text-sm text-stone-700 dark:text-stone-300">
-              Interactive 5-step board yield, hardware, and substrate calculator for <strong className="text-amber-900 dark:text-amber-200">{company.name}</strong>.
+            <p className="text-xs text-slate-600 dark:text-zinc-400 font-sans mt-0.5">
+              5-step substrate yield, Blum hardware costing & automated BOQ generation for <strong className="text-black dark:text-white font-mono">{company.name}</strong>.
             </p>
           </div>
         </div>
 
-        {/* 1-Click Value-Engineering Toggle */}
-        <button
-          onClick={() => setValueEngineeringActive(!valueEngineeringActive)}
-          className={`px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 border transition-all ${
-            valueEngineeringActive
-              ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-lg shadow-amber-500/20 font-bold'
-              : 'bg-white dark:bg-stone-900 text-stone-800 dark:text-amber-300 border-stone-300 dark:border-amber-800/60 hover:bg-stone-50 dark:hover:bg-stone-800 shadow-sm'
-          }`}
-        >
-          <TrendingDown className="w-4 h-4 text-amber-600 dark:text-amber-400" />
-          <span>{valueEngineeringActive ? 'Value-Engineering Active' : 'Enable Value-Engineering'}</span>
-          {valueEngineeringActive && <span className="bg-slate-950 text-amber-400 px-1.5 py-0.5 rounded text-[10px] font-mono">-{veSavingsPct}%</span>}
-        </button>
+        {/* Action Controls: Value Engineering + Share URL */}
+        <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+          <button
+            type="button"
+            onClick={handleCopyShareLink}
+            className="min-h-[44px] px-4 py-2 border-2 border-black dark:border-zinc-700 bg-slate-100 hover:bg-slate-200 dark:bg-zinc-900 dark:hover:bg-zinc-800 text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer"
+            title="Copy sharable URL preserving all current configuration parameters"
+          >
+            {copiedLink ? (
+              <>
+                <Check className="w-4 h-4 text-emerald-600" />
+                <span className="text-emerald-700 dark:text-emerald-400">Link Copied!</span>
+              </>
+            ) : (
+              <>
+                <Link2 className="w-4 h-4 text-slate-600 dark:text-zinc-400" />
+                <span>Share Spec Link</span>
+              </>
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setValueEngineeringActive(!valueEngineeringActive)}
+            className={`min-h-[44px] px-4 py-2 text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 border-2 transition-all cursor-pointer ${
+              valueEngineeringActive
+                ? 'bg-amber-500 text-black border-black dark:border-white shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]'
+                : 'bg-black text-white dark:bg-zinc-800 dark:text-amber-300 border-black dark:border-zinc-700 hover:bg-zinc-800'
+            }`}
+          >
+            <TrendingDown className="w-4 h-4" />
+            <span>{valueEngineeringActive ? 'Value-Eng Active' : 'Value-Engineer'}</span>
+            {valueEngineeringActive && <span className="bg-black text-amber-400 px-1.5 py-0.5 text-[10px]">-{veSavingsPct}%</span>}
+          </button>
+        </div>
       </div>
 
-      {/* Main Grid */}
+      {/* Main Grid: Responsive 12-column layout */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         
         {/* Left Column: 5-Step Configurator Controls (7 cols) */}
-        <div className="lg:col-span-7 bg-white dark:bg-[#12110F] border border-stone-200 dark:border-stone-800 rounded-2xl p-6 space-y-6 shadow-xl dark:shadow-2xl transition-colors duration-200">
+        <div className="lg:col-span-7 bg-white dark:bg-zinc-950 border-2 border-black dark:border-zinc-800 p-5 sm:p-6 space-y-6">
           
           {/* Step 1: Project Type */}
           <div>
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-mono text-amber-600 dark:text-amber-500 uppercase tracking-widest font-bold">
-                Step 01 // Project Classification
+            <div className="flex items-center justify-between mb-3 border-b border-black/10 dark:border-zinc-800 pb-2">
+              <span className="text-xs uppercase tracking-widest text-amber-600 dark:text-amber-400 font-black">
+                01 // Architectural Project Category
               </span>
-              <span className="text-xs text-stone-500 dark:text-stone-400">Select architectural category</span>
+              <span className="text-xs text-slate-500 dark:text-zinc-400">Select typology</span>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               {Object.entries(projectCatalog).map(([key, item]) => (
@@ -315,17 +373,17 @@ Generated via ${company.name} Bespoke Joinery Configurator. Requesting factory c
                   key={key}
                   type="button"
                   onClick={() => setProjectType(key)}
-                  className={`p-3 rounded-xl border text-left transition-all ${
+                  className={`min-h-[44px] p-3 border-2 text-left transition-all cursor-pointer ${
                     projectType === key
-                      ? 'bg-amber-50 border-amber-500 text-stone-900 dark:bg-amber-950/40 dark:border-amber-500/80 dark:text-white shadow-sm'
-                      : 'bg-stone-50 dark:bg-stone-900/60 border-stone-200 dark:border-stone-800 text-stone-600 dark:text-stone-400 hover:border-stone-300 dark:hover:border-stone-700'
+                      ? 'bg-amber-500 text-black border-black font-bold shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]'
+                      : 'bg-slate-50 dark:bg-zinc-900 border-slate-300 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 hover:border-black dark:hover:border-zinc-600'
                   }`}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-sm font-semibold text-stone-900 dark:text-stone-100">{item.name}</span>
-                    {projectType === key && <Check className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />}
+                    <span className="text-xs font-black uppercase tracking-tight">{item.name}</span>
+                    {projectType === key && <Check className="w-4 h-4 text-black shrink-0" />}
                   </div>
-                  <p className="text-[11px] text-stone-500 dark:text-stone-400 mt-1 line-clamp-1">{item.desc}</p>
+                  <p className="text-[11px] opacity-80 mt-1 line-clamp-1 font-sans">{item.desc}</p>
                 </button>
               ))}
             </div>
@@ -333,15 +391,15 @@ Generated via ${company.name} Bespoke Joinery Configurator. Requesting factory c
 
           {/* Step 2: Lagos Substrate Tiers */}
           <div>
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-mono text-amber-600 dark:text-amber-500 uppercase tracking-widest font-bold">
-                Step 02 // Core Substrate & Moisture Grade
+            <div className="flex items-center justify-between mb-3 border-b border-black/10 dark:border-zinc-800 pb-2">
+              <span className="text-xs uppercase tracking-widest text-amber-600 dark:text-amber-400 font-black">
+                02 // Substrate & Moisture Grade
               </span>
-              <span className="text-xs text-stone-500 dark:text-stone-400">Lagos coastal tolerance tier</span>
+              <span className="text-xs text-slate-500 dark:text-zinc-400">Lagos coastal tolerance</span>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-              {Object.entries(substrates).map(([key, item]) => {
-                const isSelected = effectiveSubstrate === key;
+              {Object.entries(substrates).map(([key, sub]) => {
+                const isSelected = substrateTier === key;
                 return (
                   <button
                     key={key}
@@ -350,54 +408,50 @@ Generated via ${company.name} Bespoke Joinery Configurator. Requesting factory c
                       setSubstrateTier(key);
                       setValueEngineeringActive(false);
                     }}
-                    className={`p-3 rounded-xl border text-left transition-all flex flex-col justify-between ${
+                    className={`min-h-[44px] p-3 border-2 text-left transition-all cursor-pointer ${
                       isSelected
-                        ? 'bg-amber-50 border-amber-500 text-stone-900 dark:bg-amber-950/50 dark:border-amber-500 dark:text-white shadow-sm'
-                        : 'bg-stone-50 dark:bg-stone-900/60 border-stone-200 dark:border-stone-800 text-stone-600 dark:text-stone-400 hover:border-stone-300 dark:hover:border-stone-700'
+                        ? 'bg-amber-500 text-black border-black font-bold shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]'
+                        : 'bg-slate-50 dark:bg-zinc-900 border-slate-300 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 hover:border-black dark:hover:border-zinc-600'
                     }`}
                   >
-                    <div>
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-xs font-bold text-stone-900 dark:text-stone-200">{item.name}</span>
-                        <span className="text-[10px] font-mono text-amber-600 dark:text-amber-400 font-bold">x{item.mult}</span>
-                      </div>
-                      <span className="text-[10px] bg-white dark:bg-stone-950 text-amber-700 dark:text-amber-300 px-1.5 py-0.5 rounded border border-stone-200 dark:border-stone-800 inline-block mb-1 font-semibold">
-                        {item.tag}
-                      </span>
-                      <p className="text-[10px] text-stone-500 dark:text-stone-400 leading-tight">{item.desc}</p>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-black uppercase">{sub.name.split('/')[0]}</span>
+                      <span className="text-[10px] font-mono px-1 py-0.2 bg-black text-white dark:bg-zinc-800 dark:text-amber-400">{sub.mult}x</span>
                     </div>
+                    <span className="text-[10px] uppercase font-bold block mt-1 text-amber-800 dark:text-amber-400">{sub.tag}</span>
+                    <p className="text-[11px] opacity-80 mt-1 line-clamp-2 font-sans">{sub.desc}</p>
                   </button>
                 );
               })}
             </div>
           </div>
 
-          {/* Step 3: Motion Hardware & Runners */}
+          {/* Step 3: Engineered Motion Hardware */}
           <div>
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-mono text-amber-600 dark:text-amber-500 uppercase tracking-widest font-bold">
-                Step 03 // Precision Motion Hardware
+            <div className="flex items-center justify-between mb-3 border-b border-black/10 dark:border-zinc-800 pb-2">
+              <span className="text-xs uppercase tracking-widest text-amber-600 dark:text-amber-400 font-black">
+                03 // Motion Hardware & Runners
               </span>
-              <span className="text-xs text-stone-500 dark:text-stone-400">Runners, hinges & lift mechanisms</span>
+              <span className="text-xs text-slate-500 dark:text-zinc-400">Blum Austria vs DTC</span>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <button
                 type="button"
                 onClick={() => {
                   setHardwareTier('dtc');
                   setValueEngineeringActive(false);
                 }}
-                className={`p-3.5 rounded-xl border text-left transition-all ${
+                className={`min-h-[44px] p-3.5 border-2 text-left transition-all cursor-pointer ${
                   effectiveHardwareTier === 'dtc'
-                    ? 'bg-amber-50 border-amber-500 text-stone-900 dark:bg-amber-950/40 dark:border-amber-500 dark:text-white shadow-sm'
-                    : 'bg-stone-50 dark:bg-stone-900/60 border-stone-200 dark:border-stone-800 text-stone-600 dark:text-stone-400 hover:border-stone-300 dark:hover:border-stone-700'
+                    ? 'bg-amber-500 text-black border-black font-bold shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]'
+                    : 'bg-slate-50 dark:bg-zinc-900 border-slate-300 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 hover:border-black dark:hover:border-zinc-600'
                 }`}
               >
                 <div className="flex items-center justify-between">
-                  <span className="text-sm font-bold text-stone-900 dark:text-stone-200">Heavy-Duty DTC Soft-Close</span>
-                  <span className="text-[10px] font-mono text-stone-500 dark:text-stone-400 font-semibold">Base Spec</span>
+                  <span className="text-xs font-black uppercase">Heavy-Duty DTC Soft-Close</span>
+                  <span className="text-[10px] font-mono font-bold bg-black text-white px-1.5 py-0.5">Base Spec</span>
                 </div>
-                <p className="text-[11px] text-stone-500 dark:text-stone-400 mt-1">High-cycle hydraulic damping, 45kg load-rated slide runners.</p>
+                <p className="text-[11px] opacity-80 mt-1 font-sans">Hydraulic damping, 45kg load-rated slide runners.</p>
               </button>
 
               <button
@@ -406,28 +460,28 @@ Generated via ${company.name} Bespoke Joinery Configurator. Requesting factory c
                   setHardwareTier('blum');
                   setValueEngineeringActive(false);
                 }}
-                className={`p-3.5 rounded-xl border text-left transition-all ${
+                className={`min-h-[44px] p-3.5 border-2 text-left transition-all cursor-pointer ${
                   effectiveHardwareTier === 'blum'
-                    ? 'bg-amber-50 border-amber-500 text-stone-900 dark:bg-amber-950/40 dark:border-amber-500 dark:text-white shadow-sm'
-                    : 'bg-stone-50 dark:bg-stone-900/60 border-stone-200 dark:border-stone-800 text-stone-600 dark:text-stone-400 hover:border-stone-300 dark:hover:border-stone-700'
+                    ? 'bg-amber-500 text-black border-black font-bold shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]'
+                    : 'bg-slate-50 dark:bg-zinc-900 border-slate-300 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 hover:border-black dark:hover:border-zinc-600'
                 }`}
               >
                 <div className="flex items-center justify-between">
-                  <span className="text-sm font-bold text-stone-900 dark:text-stone-200">Blum Tandembox / Aventos HF</span>
-                  <span className="text-[10px] font-mono text-amber-700 dark:text-amber-400 font-bold">+32% Premium</span>
+                  <span className="text-xs font-black uppercase">Blum Austria Tandembox</span>
+                  <span className="text-[10px] font-mono font-bold bg-amber-600 text-white px-1.5 py-0.5">+32% Premium</span>
                 </div>
-                <p className="text-[11px] text-stone-500 dark:text-stone-400 mt-1">Austrian bi-fold lifts, Tip-On Blumotion push-to-open integration.</p>
+                <p className="text-[11px] opacity-80 mt-1 font-sans">Austrian bi-fold lifts, Tip-On Blumotion push-to-open.</p>
               </button>
             </div>
           </div>
 
           {/* Step 4: Scale & Board Yield Calculation */}
-          <div className="bg-stone-50 dark:bg-stone-950/70 p-4 rounded-xl border border-stone-200 dark:border-stone-800/80 space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-mono text-amber-600 dark:text-amber-500 uppercase tracking-widest font-bold">
-                Step 04 // Run Length & Board Yield Math
+          <div className="border-2 border-black dark:border-zinc-800 p-4 bg-slate-50 dark:bg-zinc-900 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-black/10 dark:border-zinc-800 pb-2">
+              <span className="text-xs uppercase tracking-widest text-amber-600 dark:text-amber-400 font-black">
+                04 // Run Length & Board Yield Math
               </span>
-              <div className="flex items-center gap-1.5 bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-700 px-3 py-1 rounded-lg shadow-sm">
+              <div className="flex items-center gap-2">
                 <input
                   type="number"
                   min="2"
@@ -435,9 +489,9 @@ Generated via ${company.name} Bespoke Joinery Configurator. Requesting factory c
                   step="0.5"
                   value={linearMeters}
                   onChange={(e) => setLinearMeters(Math.max(2, Number(e.target.value)))}
-                  className="w-16 bg-transparent text-right font-mono text-sm font-bold text-amber-600 dark:text-amber-400 focus:outline-none"
+                  className="w-20 min-h-[44px] bg-white dark:bg-black border-2 border-black dark:border-zinc-700 px-3 py-1 text-center font-mono text-sm font-bold text-slate-900 dark:text-white"
                 />
-                <span className="text-xs text-stone-500 dark:text-stone-400 font-mono">Meters</span>
+                <span className="text-xs font-bold uppercase">Meters</span>
               </div>
             </div>
 
@@ -448,36 +502,36 @@ Generated via ${company.name} Bespoke Joinery Configurator. Requesting factory c
               step="0.5"
               value={linearMeters}
               onChange={(e) => setLinearMeters(Number(e.target.value))}
-              className="w-full accent-amber-500 cursor-pointer h-2 bg-stone-200 dark:bg-stone-800 rounded-lg appearance-none"
+              className="w-full accent-amber-500 cursor-pointer h-3 bg-slate-300 dark:bg-zinc-800 border border-black dark:border-zinc-700 appearance-none"
             />
 
             {/* Board yield telemetry */}
-            <div className="grid grid-cols-3 gap-2 pt-2 text-center">
-              <div className="bg-white dark:bg-stone-900/80 border border-stone-200 dark:border-stone-800 p-2 rounded-lg shadow-sm">
-                <span className="text-[10px] font-mono text-stone-500 dark:text-stone-400 uppercase block">4x8ft Panels Needed</span>
-                <span className="text-base font-bold font-mono text-amber-700 dark:text-amber-300">{grossBoardsWithWaste} Boards</span>
-                <span className="text-[9px] text-stone-400 dark:text-stone-500 block">(incl. 15% wastage)</span>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-2 text-center">
+              <div className="bg-white dark:bg-black border border-slate-300 dark:border-zinc-800 p-3">
+                <span className="text-[10px] font-mono uppercase block text-slate-500">4x8ft Panels Needed</span>
+                <span className="text-base font-black font-mono text-amber-600 dark:text-amber-400 tabular-nums">{grossBoardsWithWaste} Boards</span>
+                <span className="text-[10px] text-slate-400 block">(incl. 15% wastage)</span>
               </div>
-              <div className="bg-white dark:bg-stone-900/80 border border-stone-200 dark:border-stone-800 p-2 rounded-lg shadow-sm">
-                <span className="text-[10px] font-mono text-stone-500 dark:text-stone-400 uppercase block">Edge-Banding ABS</span>
-                <span className="text-base font-bold font-mono text-amber-700 dark:text-amber-300">{edgeBandingMeters} Meters</span>
-                <span className="text-[9px] text-stone-400 dark:text-stone-500 block">2.0mm High-Impact</span>
+              <div className="bg-white dark:bg-black border border-slate-300 dark:border-zinc-800 p-3">
+                <span className="text-[10px] font-mono uppercase block text-slate-500">Edge-Banding ABS</span>
+                <span className="text-base font-black font-mono text-amber-600 dark:text-amber-400 tabular-nums">{edgeBandingMeters} Meters</span>
+                <span className="text-[10px] text-slate-400 block">2.0mm High-Impact</span>
               </div>
-              <div className="bg-white dark:bg-stone-900/80 border border-stone-200 dark:border-stone-800 p-2 rounded-lg shadow-sm">
-                <span className="text-[10px] font-mono text-stone-500 dark:text-stone-400 uppercase block">Motion Hinges / Pairs</span>
-                <span className="text-base font-bold font-mono text-amber-700 dark:text-amber-300">{selectedProject.hardwareUnits} Units</span>
-                <span className="text-[9px] text-stone-400 dark:text-stone-500 block">{effectiveHardwareTier.toUpperCase()} System</span>
+              <div className="bg-white dark:bg-black border border-slate-300 dark:border-zinc-800 p-3">
+                <span className="text-[10px] font-mono uppercase block text-slate-500">Motion Pairs</span>
+                <span className="text-base font-black font-mono text-amber-600 dark:text-amber-400 tabular-nums">{selectedProject.hardwareUnits} Units</span>
+                <span className="text-[10px] text-slate-400 block">{effectiveHardwareTier.toUpperCase()} System</span>
               </div>
             </div>
           </div>
 
           {/* Step 5: Lagos Logistics & Haulage Zones */}
           <div>
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-mono text-amber-600 dark:text-amber-500 uppercase tracking-widest font-bold">
-                Step 05 // Lagos Haulage & Site Hoisting
+            <div className="flex items-center justify-between mb-3 border-b border-black/10 dark:border-zinc-800 pb-2">
+              <span className="text-xs uppercase tracking-widest text-amber-600 dark:text-amber-400 font-black">
+                05 // Lagos Haulage & Site Hoisting
               </span>
-              <span className="text-xs text-stone-500 dark:text-stone-400">Corridor logistics & assembly</span>
+              <span className="text-xs text-slate-500 dark:text-zinc-400">Transit & rigging</span>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               {Object.entries(haulageZones).map(([key, zone]) => (
@@ -485,15 +539,15 @@ Generated via ${company.name} Bespoke Joinery Configurator. Requesting factory c
                   key={key}
                   type="button"
                   onClick={() => setHaulageZone(key)}
-                  className={`p-3 rounded-xl border text-left text-xs transition-all ${
+                  className={`min-h-[44px] p-3 border-2 text-left text-xs transition-all cursor-pointer ${
                     haulageZone === key
-                      ? 'bg-amber-50 border-amber-500 text-stone-900 dark:bg-amber-950/40 dark:border-amber-500 dark:text-white shadow-sm'
-                      : 'bg-stone-50 dark:bg-stone-900/60 border-stone-200 dark:border-stone-800 text-stone-600 dark:text-stone-400 hover:border-stone-300 dark:hover:border-stone-700'
+                      ? 'bg-amber-500 text-black border-black font-bold shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]'
+                      : 'bg-slate-50 dark:bg-zinc-900 border-slate-300 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 hover:border-black dark:hover:border-zinc-600'
                   }`}
                 >
-                  <span className="block font-medium text-stone-800 dark:text-stone-200 truncate">{zone.name.split('(')[0]}</span>
-                  <span className="text-[10px] text-stone-500 dark:text-stone-400 block mt-0.5">
-                    {formatNgn(zone.cost + zone.hoistingCharge)} (incl. hoist)
+                  <span className="block font-bold truncate">{zone.name.split('(')[0]}</span>
+                  <span className="text-[11px] font-mono block mt-1 tabular-nums">
+                    {formatNgn(zone.cost + zone.hoistingCharge)}
                   </span>
                 </button>
               ))}
@@ -504,158 +558,198 @@ Generated via ${company.name} Bespoke Joinery Configurator. Requesting factory c
 
         {/* Right Column: Editorial BOQ Generator & WhatsApp Card (5 cols) */}
         <div className="lg:col-span-5 space-y-4">
-          <div className="bg-white dark:bg-[#151412] border border-stone-200 dark:border-stone-800 rounded-2xl p-6 shadow-xl dark:shadow-2xl relative transition-colors duration-200">
+          <div className="bg-white dark:bg-zinc-950 border-2 border-black dark:border-zinc-800 p-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.1)] relative">
             
             <div className="space-y-5">
               
               {/* Header */}
-              <div className="flex items-center justify-between pb-3 border-b border-stone-200 dark:border-stone-800">
+              <div className="flex items-center justify-between pb-3 border-b-2 border-black dark:border-zinc-800">
                 <div>
-                  <span className="text-[10px] font-mono uppercase tracking-widest text-amber-600 dark:text-amber-500 font-bold">Bill of Quantities</span>
-                  <h3 className="text-lg font-bold text-stone-900 dark:text-stone-100 flex items-center gap-2">
-                    {company.name} Specification
+                  <span className="text-xs uppercase tracking-widest text-amber-600 dark:text-amber-400 font-black">
+                    Live Bill of Quantities
+                  </span>
+                  <h3 className="text-lg font-black uppercase text-slate-900 dark:text-white">
+                    {company.name} BOQ
                   </h3>
                 </div>
-                <span className="text-xs font-mono bg-stone-100 dark:bg-stone-900 border border-stone-200 dark:border-stone-700 px-2.5 py-1 rounded-lg text-amber-700 dark:text-amber-400 font-bold">
+                <span className="text-xs font-mono bg-black text-amber-400 px-3 py-1 font-black">
                   {linearMeters}m Run
                 </span>
               </div>
 
-              {/* Value Engineering Callout when Active */}
+              {/* Value Engineering Callout */}
               {valueEngineeringActive && (
-                <div className="bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-300 dark:border-emerald-500/40 rounded-xl p-3 text-xs text-emerald-800 dark:text-emerald-300 flex items-center justify-between">
+                <div className="bg-emerald-100 dark:bg-emerald-950/60 border-2 border-emerald-600 p-3 text-xs text-emerald-900 dark:text-emerald-300 flex items-center justify-between font-bold">
                   <div className="flex items-center gap-2">
-                    <TrendingDown className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                    <span>VE optimization applied without degrading facade aesthetic.</span>
+                    <TrendingDown className="w-4 h-4 text-emerald-700 dark:text-emerald-400 shrink-0" />
+                    <span>VE applied without degrading facade spec.</span>
                   </div>
-                  <strong className="font-mono text-emerald-700 dark:text-emerald-200">Saved {formatNgn(veSavingsNgn)}</strong>
+                  <strong className="font-mono tabular-nums text-emerald-900 dark:text-emerald-200">
+                    Saved {formatNgn(veSavingsNgn)}
+                  </strong>
                 </div>
               )}
 
-              {/* BOQ Itemized Breakdown */}
-              <div className="space-y-3 text-sm">
-                <div className="flex justify-between items-center text-stone-700 dark:text-stone-300">
-                  <div>
-                    <span className="text-xs text-stone-500 dark:text-stone-400 block">Core Substrate Material</span>
-                    <span className="text-[11px] text-stone-400 dark:text-stone-500">{grossBoardsWithWaste}x {currentSubstrate.name}</span>
-                  </div>
-                  <span className="font-mono font-medium tabular-nums text-stone-900 dark:text-stone-100">{formatNgn(substrateMaterialsCost)}</span>
-                </div>
-
-                <div className="flex justify-between items-center text-stone-700 dark:text-stone-300">
-                  <div>
-                    <span className="text-xs text-stone-500 dark:text-stone-400 block">Engineered Motion Hardware</span>
-                    <span className="text-[11px] text-stone-400 dark:text-stone-500">{selectedProject.hardwareUnits}x {effectiveHardwareTier.toUpperCase()} Damped Units</span>
-                  </div>
-                  <span className="font-mono font-medium tabular-nums text-stone-900 dark:text-stone-100">{formatNgn(totalHardwareCost)}</span>
-                </div>
-
-                <div className="flex justify-between items-center text-stone-700 dark:text-stone-300">
-                  <div>
-                    <span className="text-xs text-stone-500 dark:text-stone-400 block">CNC Milling, Joinery & Assembly</span>
-                    <span className="text-[11px] text-stone-400 dark:text-stone-500">Workshop fabrication labor</span>
-                  </div>
-                  <span className="font-mono font-medium tabular-nums text-stone-900 dark:text-stone-100">{formatNgn(joineryLaborCost)}</span>
-                </div>
-
-                <div className="flex justify-between items-center text-stone-700 dark:text-stone-300">
-                  <div>
-                    <span className="text-xs text-stone-500 dark:text-stone-400 block">Edge-Banding & Bonding</span>
-                    <span className="text-[11px] text-stone-400 dark:text-stone-500">{edgeBandingMeters}m 2mm impact ABS</span>
-                  </div>
-                  <span className="font-mono font-medium tabular-nums text-stone-900 dark:text-stone-100">{formatNgn(edgeBandingCost)}</span>
-                </div>
-
-                <div className="flex justify-between items-center text-stone-700 dark:text-stone-300">
-                  <div>
-                    <span className="text-xs text-stone-500 dark:text-stone-400 block">Lagos Haulage & Site Hoisting</span>
-                    <span className="text-[11px] text-stone-400 dark:text-stone-500">{zoneInfo.name.split('(')[0]}</span>
-                  </div>
-                  <span className="font-mono font-medium tabular-nums text-stone-900 dark:text-stone-100">{formatNgn(logisticsTotal)}</span>
-                </div>
+              {/* Horizontal Scrollable BOQ Matrix Table */}
+              <div className="w-full overflow-x-auto border border-slate-200 dark:border-zinc-800">
+                <table className="w-full min-w-max text-left text-xs font-mono">
+                  <thead className="bg-slate-100 dark:bg-zinc-900 text-slate-700 dark:text-zinc-300 uppercase text-[10px] border-b border-slate-200 dark:border-zinc-800">
+                    <tr>
+                      <th className="p-2.5">Component / Spec</th>
+                      <th className="p-2.5 text-center">Qty</th>
+                      <th className="p-2.5 text-right">Total (₦)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-zinc-900 text-slate-800 dark:text-zinc-200">
+                    <tr>
+                      <td className="p-2.5">
+                        <strong className="block text-xs">{effectiveSubstrate.name}</strong>
+                        <span className="text-[10px] text-slate-500">Core Substrate Panels</span>
+                      </td>
+                      <td className="p-2.5 text-center tabular-nums">{grossBoardsWithWaste} bds</td>
+                      <td className="p-2.5 text-right font-bold tabular-nums">{formatNgn(substrateMaterialsCost)}</td>
+                    </tr>
+                    <tr>
+                      <td className="p-2.5">
+                        <strong className="block text-xs">{effectiveHardwareTier.toUpperCase()} Damped Suite</strong>
+                        <span className="text-[10px] text-slate-500">Runners & Hinges</span>
+                      </td>
+                      <td className="p-2.5 text-center tabular-nums">{selectedProject.hardwareUnits} units</td>
+                      <td className="p-2.5 text-right font-bold tabular-nums">{formatNgn(totalHardwareCost)}</td>
+                    </tr>
+                    <tr>
+                      <td className="p-2.5">
+                        <strong className="block text-xs">CNC Joinery & Labor</strong>
+                        <span className="text-[10px] text-slate-500">Milling & Assembly</span>
+                      </td>
+                      <td className="p-2.5 text-center tabular-nums">{linearMeters}m</td>
+                      <td className="p-2.5 text-right font-bold tabular-nums">{formatNgn(joineryLaborCost)}</td>
+                    </tr>
+                    <tr>
+                      <td className="p-2.5">
+                        <strong className="block text-xs">ABS Edge-Banding</strong>
+                        <span className="text-[10px] text-slate-500">2.0mm High Impact</span>
+                      </td>
+                      <td className="p-2.5 text-center tabular-nums">{edgeBandingMeters}m</td>
+                      <td className="p-2.5 text-right font-bold tabular-nums">{formatNgn(edgeBandingCost)}</td>
+                    </tr>
+                    <tr>
+                      <td className="p-2.5">
+                        <strong className="block text-xs">Haulage & Hoisting</strong>
+                        <span className="text-[10px] text-slate-500">{zoneInfo.name.split('(')[0]}</span>
+                      </td>
+                      <td className="p-2.5 text-center">Site</td>
+                      <td className="p-2.5 text-right font-bold tabular-nums">{formatNgn(logisticsTotal)}</td>
+                    </tr>
+                  </tbody>
+                </table>
               </div>
 
               {/* Budget Gate Total Card */}
-              <div className="bg-stone-50 dark:bg-stone-950 border-2 border-amber-500/40 rounded-xl p-4 space-y-1 shadow-sm">
+              <div className="bg-slate-50 dark:bg-black border-2 border-black dark:border-amber-500 p-4 space-y-1">
                 <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-mono text-amber-700 dark:text-amber-400 uppercase tracking-wider font-bold">
+                  <span className="text-xs uppercase tracking-wider font-bold text-amber-600 dark:text-amber-400">
                     Total Estimated Fit-Out Budget
                   </span>
-                  <span className={`text-[10px] font-mono px-2 py-0.5 rounded ${
-                    meetsThreshold ? 'bg-emerald-50 text-emerald-700 border border-emerald-300 dark:bg-emerald-950 dark:text-emerald-400 dark:border-emerald-800' : 'bg-red-50 text-red-700 border border-red-300 dark:bg-red-950 dark:text-red-400 dark:border-red-800'
+                  <span className={`text-[10px] px-2 py-0.5 border font-bold uppercase ${
+                    meetsThreshold 
+                      ? 'bg-emerald-100 text-emerald-800 border-emerald-500 dark:bg-emerald-950 dark:text-emerald-300' 
+                      : 'bg-red-100 text-red-800 border-red-500 dark:bg-red-950 dark:text-red-300'
                   }`}>
                     {meetsThreshold ? 'Threshold Approved' : 'Under ₦3.5M Minimum'}
                   </span>
                 </div>
                 
-                <div className="text-2xl font-black text-stone-900 dark:text-white font-mono tabular-nums tracking-tight">
+                <div className="text-3xl font-black text-slate-900 dark:text-white font-mono tabular-nums tracking-tight">
                   {formatNgn(totalProductionCostNgn)}
                 </div>
                 
-                <p className="text-[10px] text-stone-500 pt-1">
-                  *Includes CAD drafting, board fabrication, edge-sealing, hardware, and site commissioning.
+                <p className="text-[10px] text-slate-500 pt-1 font-sans">
+                  *Includes CAD drafting, board fabrication, edge-sealing, motion hardware, and site commissioning.
                 </p>
               </div>
 
-              {/* Action Buttons */}
+              {/* Action Buttons (All min-h-[44px]) */}
               <div className="space-y-2 pt-2">
                 <a
                   href={whatsappUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-2 text-sm shadow-lg shadow-emerald-950/20 dark:shadow-emerald-950/40 transition-all group"
+                  className="w-full min-h-[48px] bg-emerald-600 hover:bg-emerald-500 text-white font-black py-3 px-4 flex items-center justify-center gap-2 text-xs uppercase tracking-wider transition-all shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5"
                 >
-                  <Send className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
+                  <Send className="w-4 h-4" />
                   <span>Send Spec Sheet to Workshop</span>
                   <ExternalLink className="w-3.5 h-3.5 opacity-70 ml-1" />
                 </a>
 
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <button
                     type="button"
                     onClick={() => setIsWhatsAppSimOpen(true)}
-                    className="bg-stone-100 hover:bg-stone-200 dark:bg-stone-900 dark:hover:bg-stone-800 text-stone-800 dark:text-stone-200 text-xs font-semibold py-2.5 px-3 rounded-xl border border-stone-200 dark:border-stone-700 flex items-center justify-center gap-1.5 transition-colors shadow-sm"
+                    className="min-h-[44px] bg-slate-100 hover:bg-slate-200 dark:bg-zinc-900 dark:hover:bg-zinc-800 text-slate-900 dark:text-white text-xs font-bold py-2.5 px-3 border border-black dark:border-zinc-700 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
                   >
-                    <Smartphone className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                    <Smartphone className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                     <span>WhatsApp Simulator</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setIsInvoiceOpen(true)}
-                    className="bg-stone-100 hover:bg-stone-200 dark:bg-stone-900 dark:hover:bg-stone-800 text-stone-800 dark:text-stone-200 text-xs font-semibold py-2.5 px-3 rounded-xl border border-stone-200 dark:border-stone-700 flex items-center justify-center gap-1.5 transition-colors shadow-sm"
+                    className="min-h-[44px] bg-slate-100 hover:bg-slate-200 dark:bg-zinc-900 dark:hover:bg-zinc-800 text-slate-900 dark:text-white text-xs font-bold py-2.5 px-3 border border-black dark:border-zinc-700 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
                   >
-                    <Printer className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                    <Printer className="w-4 h-4 text-amber-600 dark:text-amber-400" />
                     <span>Official BOQ PDF</span>
                   </button>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={handleCopy}
-                  className="w-full bg-stone-50 hover:bg-stone-100 dark:bg-stone-950 dark:hover:bg-stone-900 text-stone-600 dark:text-stone-400 font-mono text-xs py-2 px-4 rounded-xl flex items-center justify-center gap-2 border border-stone-200 dark:border-stone-800 transition-colors"
-                >
-                  {copied ? (
-                    <>
-                      <Check className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                      <span className="text-emerald-700 dark:text-emerald-400 font-semibold">BOQ Spec Copied to Clipboard!</span>
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="w-4 h-4 text-stone-400" />
-                      <span>Copy Full Specifier BOQ</span>
-                    </>
-                  )}
-                </button>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={handleCopyShareLink}
+                    className="min-h-[44px] bg-slate-100 hover:bg-slate-200 dark:bg-zinc-900 dark:hover:bg-zinc-800 text-slate-900 dark:text-white font-mono text-xs font-bold py-2.5 px-3 border border-black dark:border-zinc-700 flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                  >
+                    {copiedLink ? (
+                      <>
+                        <Check className="w-4 h-4 text-emerald-600" />
+                        <span className="text-emerald-700 dark:text-emerald-400">Link Copied!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Link2 className="w-4 h-4 text-slate-600 dark:text-zinc-400" />
+                        <span>Copy Quote Link</span>
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleCopy}
+                    className="min-h-[44px] bg-slate-100 hover:bg-slate-200 dark:bg-zinc-900 dark:hover:bg-zinc-800 text-slate-900 dark:text-white font-mono text-xs font-bold py-2.5 px-3 border border-black dark:border-zinc-700 flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                  >
+                    {copied ? (
+                      <>
+                        <Check className="w-4 h-4 text-emerald-600" />
+                        <span className="text-emerald-700 dark:text-emerald-400">BOQ Copied!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-4 h-4 text-slate-600 dark:text-zinc-400" />
+                        <span>Copy Raw BOQ</span>
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
 
               {/* Desk Information Footer */}
-              <div className="pt-3 border-t border-stone-200 dark:border-stone-800/80 text-[11px] text-stone-500 flex items-center justify-between">
+              <div className="pt-3 border-t border-black/10 dark:border-zinc-800 text-xs text-slate-500 flex items-center justify-between">
                 <span className="flex items-center gap-1.5">
-                  <MapPin className="w-3 h-3 text-stone-400" />
+                  <MapPin className="w-3.5 h-3.5 text-slate-400" />
                   {company.location}
                 </span>
-                <span className="font-mono text-amber-700 dark:text-amber-500/80 font-medium">Est. 48hr Costing Delay Solved</span>
+                <span className="font-mono text-amber-600 dark:text-amber-400 font-bold uppercase">
+                  48hr Costing Delay Solved
+                </span>
               </div>
 
             </div>

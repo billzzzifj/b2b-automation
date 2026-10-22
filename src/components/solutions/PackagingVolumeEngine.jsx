@@ -1,46 +1,35 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Package, 
   Layers, 
   Sparkles, 
-  FileCheck2, 
+  FileCheck, 
   UploadCloud, 
-  Check, 
-  Copy, 
   Send, 
   ExternalLink, 
-  Percent, 
-  ArrowDownRight, 
-  HelpCircle,
-  ShieldCheck,
-  MapPin,
-  FileCode,
+  Copy, 
+  Check, 
+  Sliders, 
+  ShoppingCart, 
+  Award, 
+  MapPin, 
+  AlertCircle,
+  TrendingDown,
+  Printer,
   Smartphone,
-  Printer
+  Link2
 } from 'lucide-react';
 import WhatsAppSimulatorModal from '../common/WhatsAppSimulatorModal';
 import ProformaInvoiceModal from '../common/ProformaInvoiceModal';
+import { getHashParams, updateHashParams, buildShareUrl } from '../../utils/urlState';
 
 export default function PackagingVolumeEngine({ company }) {
   const custom = company?.customMetrics || {
     plateChargeNgn: 45000,
     sampleKitNgn: 15000,
-    leadTimeDays: 7,
     baseMailer500UnitNgn: 1250,
     baseMailer10kUnitNgn: 260
   };
-
-  // State
-  const [packagingType, setPackagingType] = useState('mailer'); // 'mailer' | 'rigid' | 'carton' | 'pouch' | 'label'
-  const [quantity, setQuantity] = useState(2500);
-  const [gsmStock, setGsmStock] = useState('350');
-  const [selectedFinishes, setSelectedFinishes] = useState(['matte']); // 'matte', 'spotUv', 'goldFoil', 'emboss'
-  const [preflightStatus, setPreflightStatus] = useState('idle'); // 'idle' | 'checking' | 'verified'
-  const [uploadedFileName, setUploadedFileName] = useState('');
-  const [sampleKitOrdered, setSampleKitOrdered] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [isWhatsAppSimOpen, setIsWhatsAppSimOpen] = useState(false);
-  const [isInvoiceOpen, setIsInvoiceOpen] = useState(false);
 
   // Packaging Catalog Specs
   const packagingCatalog = {
@@ -99,7 +88,39 @@ export default function PackagingVolumeEngine({ company }) {
     emboss: { name: 'Blind Embossing / Debossing', costFactor: 0.12, desc: 'Multi-level sculptured structural relief' }
   };
 
-  const currentPkg = packagingCatalog[packagingType];
+  // Read initial configuration from URL params
+  const initialParams = getHashParams();
+
+  // State
+  const [packagingType, setPackagingType] = useState(
+    initialParams.pkg && packagingCatalog[initialParams.pkg] ? initialParams.pkg : 'mailer'
+  );
+  const [quantity, setQuantity] = useState(
+    initialParams.qty ? Math.max(500, Math.min(50000, Number(initialParams.qty))) : 2500
+  );
+  const [gsmStock, setGsmStock] = useState(initialParams.gsm || '350');
+  const [selectedFinishes, setSelectedFinishes] = useState(
+    initialParams.finishes ? initialParams.finishes.split(',').filter(f => finishCatalog[f]) : ['matte']
+  );
+  const [preflightStatus, setPreflightStatus] = useState('idle');
+  const [uploadedFileName, setUploadedFileName] = useState('');
+  const [sampleKitOrdered, setSampleKitOrdered] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
+  const [isWhatsAppSimOpen, setIsWhatsAppSimOpen] = useState(false);
+  const [isInvoiceOpen, setIsInvoiceOpen] = useState(false);
+
+  // Sync state to URL hash query parameters on change
+  useEffect(() => {
+    updateHashParams({
+      pkg: packagingType,
+      qty: quantity,
+      gsm: gsmStock,
+      finishes: selectedFinishes.join(',')
+    }, company?.slug);
+  }, [packagingType, quantity, gsmStock, selectedFinishes, company?.slug]);
+
+  const currentPkg = packagingCatalog[packagingType] || packagingCatalog.mailer;
 
   // Volume Unit Cost Calculation with economies of scale curve
   const minVol = 500;
@@ -139,42 +160,38 @@ export default function PackagingVolumeEngine({ company }) {
     }
   };
 
+  const formatNgn = (val) => `₦${Math.round(val).toLocaleString()}`;
+
   // Pre-flight file simulation
-  const handleSimulatePreflight = (e) => {
-    const file = e.target.files?.[0];
+  const handlePreflightUpload = (e) => {
+    const file = e.target.files[0];
     if (file) {
       setUploadedFileName(file.name);
       setPreflightStatus('checking');
       setTimeout(() => {
         setPreflightStatus('verified');
-      }, 1400);
-    } else {
-      setUploadedFileName('brand-packaging-die-cut.pdf');
-      setPreflightStatus('checking');
-      setTimeout(() => {
-        setPreflightStatus('verified');
-      }, 1400);
+      }, 1500);
     }
   };
 
-  const formatNgn = (val) => `₦${Math.round(val).toLocaleString()}`;
-
-  // WhatsApp payload
-  const whatsappPackagingText = `*BULK PACKAGING INQUIRY // ${company.name.toUpperCase()}*
+  // WhatsApp Packaging RFQ Payload
+  const whatsappPackagingText = `*BULK PRINT & PACKAGING RFQ // ${company.name.toUpperCase()}*
 ---------------------------------------
-• Product Line: ${currentPkg.name}
-• Order Volume: ${quantity.toLocaleString()} Units
-• Substrate Core: ${gsmStock} GSM Artboard / Board
-• Finishes Applied: ${selectedFinishes.map(f => finishCatalog[f].name).join(', ')}
-• Tooling & CTP Plate Charge: ${formatNgn(currentPkg.plateFee)}
+• Product Format: ${currentPkg.name}
+• Order Volume: ${quantity.toLocaleString()} Units (MOQ: ${currentPkg.moq})
+• Board Substrate: ${gsmStock} GSM High-Yield Rigid Board
+• Premium Finishes: ${selectedFinishes.map(f => finishCatalog[f].name).join(' + ')}
+• CTP Pre-Flight Status: ${preflightStatus === 'verified' ? `VERIFIED (File: ${uploadedFileName || 'vector.ai'})` : 'Awaiting vector upload'}
+• Sample Kit Request: ${sampleKitOrdered ? 'YES (+₦15,000 credited to invoice)' : 'NO (Direct Bulk Run)'}
 ---------------------------------------
-*COMMERCIAL UNIT METRICS:*
-• Unit Production Cost: ${formatNgn(finalUnitPriceNgn)} / unit
-• Total Production Run: ${formatNgn(totalProductionNgn)}
-• Total Turnkey Order: ${formatNgn(totalOrderNgn)}
-• Volume Efficiency: ${volumeSavingsPct}% Bulk Cost Reduction (${formatNgn(volumeSavingsNgn)} Saved)
-${preflightStatus === 'verified' ? `• Artwork Pre-Flight: VERIFIED (300DPI, CMYK, 3mm Bleed)\n` : ''}${sampleKitOrdered ? `• Sample Kit Pack: INCLUDED (₦15,000 credited back on bulk invoice)\n` : ''}---------------------------------------
-Generated via ${company.name} Automated Packaging Volume Engine. Requesting print-bed allocation & die line template.`;
+*PRODUCTION INVESTMENT BREAKDOWN:*
+• Unit Cost: ${formatNgn(finalUnitPriceNgn)} / unit (Saved ${volumeSavingsPct}% via volume tier)
+• Bulk Run Subtotal: ${formatNgn(totalProductionNgn)}
+• CTP Plates & Die-Cutting Tooling: ${formatNgn(currentPkg.plateFee)}
+${sampleKitOrdered ? `• Physical Sample Proofing Pack: ${formatNgn(custom.sampleKitNgn || 15000)}\n` : ''}---------------------------------------
+*TOTAL ESTIMATED PRODUCTION: ${formatNgn(totalOrderNgn + (sampleKitOrdered ? (custom.sampleKitNgn || 15000) : 0))}*
+---------------------------------------
+Generated via ${company.name} Automated Intake Engine. Requesting official proforma invoice and press-run slot.`;
 
   const handleCopy = () => {
     navigator.clipboard.writeText(whatsappPackagingText);
@@ -182,135 +199,174 @@ Generated via ${company.name} Automated Packaging Volume Engine. Requesting prin
     setTimeout(() => setCopied(false), 2200);
   };
 
-  const phoneTarget = company.samplePhone || '2348034455667';
+  const handleCopyShareLink = () => {
+    const shareUrl = buildShareUrl(company.slug, {
+      pkg: packagingType,
+      qty: quantity,
+      gsm: gsmStock,
+      finishes: selectedFinishes.join(',')
+    });
+    navigator.clipboard.writeText(shareUrl);
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2200);
+  };
+
+  const phoneTarget = company.samplePhone || '2348033045612';
   const whatsappUrl = `https://wa.me/${phoneTarget}?text=${encodeURIComponent(whatsappPackagingText)}`;
 
   const invoiceData = {
-    title: `${currentPkg.name} Commercial Print Run`,
-    subtitle: `Volume: ${quantity.toLocaleString()} Pcs • ${gsmStock} GSM • ${selectedFinishes.map(f => finishCatalog[f].name).join(', ')}`,
-    subtotal: totalProductionNgn,
-    surcharges: currentPkg.plateFee + (sampleKitOrdered ? (custom.sampleKitNgn || 15000) : 0),
+    title: `${currentPkg.name} Bulk Packaging Quotation`,
+    subtitle: `Volume: ${quantity.toLocaleString()} Units • ${gsmStock} GSM • ${selectedFinishes.map(f => finishCatalog[f].name).join(', ')}`,
+    subtotal: totalOrderNgn,
+    surcharges: sampleKitOrdered ? (custom.sampleKitNgn || 15000) : 0,
     vat: Math.round(totalOrderNgn * 0.075),
     total: totalOrderNgn + (sampleKitOrdered ? (custom.sampleKitNgn || 15000) : 0) + Math.round(totalOrderNgn * 0.075),
     items: [
       {
-        name: `Core Production: ${currentPkg.name}`,
-        desc: `${quantity.toLocaleString()} units on ${gsmStock} GSM stock with ${selectedFinishes.map(f => finishCatalog[f].name).join(', ')}`,
-        qty: `${quantity.toLocaleString()} Pcs`,
+        name: `Custom Packaging Production: ${currentPkg.name}`,
+        desc: `${quantity.toLocaleString()} units @ ${formatNgn(finalUnitPriceNgn)}/unit (${gsmStock} GSM substrate with specialty finishes)`,
+        qty: `${quantity.toLocaleString()} Units`,
         rate: finalUnitPriceNgn,
         total: totalProductionNgn
       },
       {
-        name: 'CTP Aluminum Plates & Die-Cut Tooling',
-        desc: 'High-resolution computerized thermal offset plates and custom steel-rule die',
-        qty: 'Tooling Setup',
+        name: 'CTP Aluminum Thermal Plates & Steel Rule Cutting Dies',
+        desc: 'One-time computerized plate output & laser-cut die rule manufacturing',
+        qty: '1 Setup',
         rate: currentPkg.plateFee,
         total: currentPkg.plateFee
       },
-      ...(sampleKitOrdered ? [
-        {
-          name: 'Pre-Production Physical Proof Swatch Pack',
-          desc: 'Digital hardcopy color-matched proof (100% credited against bulk run invoice)',
-          qty: '1 Kit',
-          rate: custom.sampleKitNgn || 15000,
-          total: custom.sampleKitNgn || 15000
-        }
-      ] : [])
+      ...(sampleKitOrdered ? [{
+        name: 'Physical Prototype Sample Box & Calibration Proof',
+        desc: 'Digital plot proof sample delivered in Lagos before full press run (credited on balance)',
+        qty: '1 Pack',
+        rate: custom.sampleKitNgn || 15000,
+        total: custom.sampleKitNgn || 15000
+      }] : [])
     ]
   };
 
+  // Helper to calculate tier prices for the matrix
+  const calculateTierUnit = (vol) => {
+    const logCur = Math.log(Math.max(minVol, vol));
+    const ratio = Math.min(1, Math.max(0, (logCur - logMin) / (logMax - logMin)));
+    const base = currentPkg.base500 - ratio * (currentPkg.base500 - currentPkg.base10k * 0.85);
+    return Math.round(base * finishMultiplier);
+  };
+
   return (
-    <div className="w-full max-w-7xl mx-auto space-y-6">
+    <div className="w-full max-w-7xl mx-auto space-y-6 font-mono text-slate-900 dark:text-slate-100">
       
-      {/* Top Banner: Swiss Style High-Contrast Header */}
-      <div className="bg-blue-50 dark:bg-slate-900 border border-blue-200 dark:border-slate-800 rounded-xl p-4 flex flex-col md:flex-row items-center justify-between gap-4 transition-colors duration-200 shadow-sm dark:shadow-none">
+      {/* Top Banner: Sliding Scale Volume Engine (Brutalist) */}
+      <div className="bg-white dark:bg-zinc-950 border-2 border-black dark:border-zinc-800 p-4 sm:p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.1)]">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-blue-500/10 border border-blue-500/30 flex items-center justify-center text-blue-600 dark:text-blue-400">
-            <Package className="w-5 h-5" />
+          <div className="w-11 h-11 bg-black text-blue-400 dark:bg-blue-600 dark:text-white flex items-center justify-center font-black shrink-0">
+            <Package className="w-6 h-6" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-mono uppercase tracking-wider text-blue-700 dark:text-blue-400 font-semibold">Bulk Production Engine</span>
-              <span className="text-[10px] font-mono bg-blue-100 text-blue-800 dark:bg-blue-500/20 dark:text-blue-300 px-2 py-0.5 rounded border border-blue-200 dark:border-blue-500/40 font-semibold">
-                Turnaround: {custom.leadTimeDays || 7} Working Days
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs uppercase tracking-widest text-blue-600 dark:text-blue-400 font-black">
+                Bulk Print & Packaging Factory
+              </span>
+              <span className="text-[11px] px-2 py-0.5 border font-bold uppercase bg-blue-100 text-blue-900 border-blue-500 dark:bg-blue-950 dark:text-blue-300 dark:border-blue-500">
+                Lagos Industrial Converter
               </span>
             </div>
-            <p className="text-sm text-slate-700 dark:text-slate-300">
-              Interactive sliding-scale unit costing & automated pre-flight for <strong className="text-slate-900 dark:text-white">{company.name}</strong>.
+            <p className="text-xs text-slate-600 dark:text-zinc-400 font-sans mt-0.5">
+              Sliding-scale MOQ curves, Spot UV / Gold Foil finishes & CTP pre-flight engine for <strong className="text-black dark:text-white font-mono">{company.name}</strong>.
             </p>
           </div>
         </div>
 
-        {/* 1-Click Sample Kit Button */}
-        <button
-          onClick={() => setSampleKitOrdered(!sampleKitOrdered)}
-          className={`px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 border transition-all ${
-            sampleKitOrdered
-              ? 'bg-blue-600 text-white border-blue-400 shadow-lg shadow-blue-600/30 font-bold'
-              : 'bg-white dark:bg-slate-950 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:border-slate-400 shadow-sm'
-          }`}
-        >
-          <Sparkles className="w-4 h-4 text-amber-500 dark:text-amber-400" />
-          <span>{sampleKitOrdered ? 'Sample Kit Added (₦15,000)' : 'Order Prototype Sample Kit'}</span>
-        </button>
+        {/* Action Controls: Share Link + Sample Kit */}
+        <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+          <button
+            type="button"
+            onClick={handleCopyShareLink}
+            className="min-h-[44px] px-4 py-2 border-2 border-black dark:border-zinc-700 bg-slate-100 hover:bg-slate-200 dark:bg-zinc-900 dark:hover:bg-zinc-800 text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer"
+            title="Copy sharable URL preserving all current volume and finish parameters"
+          >
+            {copiedLink ? (
+              <>
+                <Check className="w-4 h-4 text-emerald-600" />
+                <span className="text-emerald-700 dark:text-emerald-400">Link Copied!</span>
+              </>
+            ) : (
+              <>
+                <Link2 className="w-4 h-4 text-slate-600 dark:text-zinc-400" />
+                <span>Share Spec Link</span>
+              </>
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setSampleKitOrdered(!sampleKitOrdered)}
+            className={`min-h-[44px] px-4 py-2 text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 border-2 transition-all cursor-pointer ${
+              sampleKitOrdered
+                ? 'bg-amber-500 text-black border-black dark:border-white shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]'
+                : 'bg-black text-white dark:bg-zinc-800 dark:text-amber-300 border-black dark:border-zinc-700 hover:bg-zinc-800'
+            }`}
+          >
+            <ShoppingCart className="w-4 h-4" />
+            <span>{sampleKitOrdered ? 'Sample Kit Added' : 'Add Sample Kit (₦15k)'}</span>
+          </button>
+        </div>
       </div>
 
-      {/* Main Grid */}
+      {/* Main Grid: Responsive 12-column layout */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         
-        {/* Left Column: Volume Slider, Packaging Types & Finishes (7 cols) */}
-        <div className="lg:col-span-7 bg-white dark:bg-slate-900/70 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 space-y-6 backdrop-blur-sm shadow-xl dark:shadow-2xl transition-colors duration-200">
+        {/* Left Column: Packaging Customizer (7 cols) */}
+        <div className="lg:col-span-7 bg-white dark:bg-zinc-950 border-2 border-black dark:border-zinc-800 p-5 sm:p-6 space-y-6">
           
-          {/* Packaging Type Selector */}
+          {/* Step 1: Packaging Format */}
           <div>
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-mono text-blue-700 dark:text-blue-400 uppercase tracking-widest font-bold">
-                01 // Select Packaging Category
+            <div className="flex items-center justify-between mb-3 border-b border-black/10 dark:border-zinc-800 pb-2">
+              <span className="text-xs uppercase tracking-widest text-blue-600 dark:text-blue-400 font-black">
+                01 // Packaging Product Typology
               </span>
-              <span className="text-xs text-slate-500 dark:text-slate-400">Commercial press specifications</span>
+              <span className="text-xs text-slate-500 dark:text-zinc-400">Select structural box or pouch</span>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
               {Object.entries(packagingCatalog).map(([key, item]) => (
                 <button
                   key={key}
                   type="button"
                   onClick={() => setPackagingType(key)}
-                  className={`p-3 rounded-xl border text-left transition-all ${
+                  className={`min-h-[44px] p-3 border-2 text-left transition-all cursor-pointer ${
                     packagingType === key
-                      ? 'bg-blue-50 border-blue-500 text-slate-900 dark:bg-blue-950/40 dark:border-blue-500 dark:text-white shadow-sm'
-                      : 'bg-slate-50 dark:bg-slate-950/60 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-700'
+                      ? 'bg-blue-600 text-white border-black font-bold shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]'
+                      : 'bg-slate-50 dark:bg-zinc-900 border-slate-300 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 hover:border-black dark:hover:border-zinc-600'
                   }`}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">{item.name}</span>
-                    {packagingType === key && <Check className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />}
+                    <span className="text-xs font-black uppercase tracking-tight">{item.name.split('(')[0]}</span>
+                    {packagingType === key && <Check className="w-4 h-4 text-white shrink-0" />}
                   </div>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 line-clamp-1">{item.subtitle}</p>
+                  <span className="text-[10px] font-mono block opacity-80 mt-1">MOQ: {item.moq.toLocaleString()} pcs</span>
                 </button>
               ))}
             </div>
           </div>
 
-          {/* Volume Scale Slider & Preset Buttons */}
-          <div className="bg-slate-50 dark:bg-slate-950/60 p-4 rounded-xl border border-slate-200 dark:border-slate-800 space-y-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <span className="text-xs font-mono text-blue-700 dark:text-blue-400 uppercase tracking-widest font-bold block">
-                  02 // Production Volume Scale (Units)
-                </span>
-                <span className="text-[11px] text-slate-500">Notice the sharp unit price drop across volume tiers</span>
-              </div>
-              <div className="flex items-center gap-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 px-3 py-1 rounded-lg shadow-sm">
+          {/* Step 2: Sliding-Scale Volume Slider */}
+          <div className="border-2 border-black dark:border-zinc-800 p-4 bg-slate-50 dark:bg-zinc-900 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-black/10 dark:border-zinc-800 pb-2">
+              <span className="text-xs uppercase tracking-widest text-blue-600 dark:text-blue-400 font-black">
+                02 // Sliding Production Volume
+              </span>
+              <div className="flex items-center gap-2">
                 <input
                   type="number"
                   min="500"
-                  max="100000"
+                  max="50000"
                   step="500"
                   value={quantity}
-                  onChange={(e) => setQuantity(Math.max(500, Number(e.target.value)))}
-                  className="w-20 bg-transparent text-right font-mono text-sm font-bold text-blue-700 dark:text-blue-400 focus:outline-none"
+                  onChange={(e) => setQuantity(Math.max(500, Math.min(50000, Number(e.target.value))))}
+                  className="w-24 min-h-[44px] bg-white dark:bg-black border-2 border-black dark:border-zinc-700 px-3 py-1 text-center font-mono text-sm font-bold text-slate-900 dark:text-white"
                 />
-                <span className="text-xs text-slate-500 dark:text-slate-400 font-mono">Pcs</span>
+                <span className="text-xs font-bold uppercase">Units</span>
               </div>
             </div>
 
@@ -321,139 +377,132 @@ Generated via ${company.name} Automated Packaging Volume Engine. Requesting prin
               step="500"
               value={quantity}
               onChange={(e) => setQuantity(Number(e.target.value))}
-              className="w-full accent-blue-500 cursor-pointer h-2 bg-slate-200 dark:bg-slate-800 rounded-lg appearance-none"
+              className="w-full accent-blue-600 cursor-pointer h-3 bg-slate-300 dark:bg-zinc-800 border border-black dark:border-zinc-700 appearance-none"
             />
 
-            {/* Quick volume presets */}
-            <div className="flex items-center gap-2 pt-1 flex-wrap">
-              {[500, 1000, 2500, 5000, 10000, 25000, 50000].map(val => (
+            {/* Quick volume buttons */}
+            <div className="grid grid-cols-4 gap-2">
+              {[1000, 5000, 10000, 25000].map(vol => (
                 <button
-                  key={val}
+                  key={vol}
                   type="button"
-                  onClick={() => setQuantity(val)}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-mono transition-colors ${
-                    quantity === val
-                      ? 'bg-blue-600 text-white font-bold shadow-sm'
-                      : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800'
+                  onClick={() => setQuantity(vol)}
+                  className={`min-h-[44px] py-1 text-xs font-bold border transition-all cursor-pointer ${
+                    quantity === vol
+                      ? 'bg-black text-blue-400 border-black dark:bg-white dark:text-black'
+                      : 'bg-white dark:bg-zinc-950 border-slate-300 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 hover:border-black'
                   }`}
                 >
-                  {val.toLocaleString()}
+                  {vol >= 1000 ? `${vol / 1000}k` : vol}
                 </button>
               ))}
             </div>
+          </div>
 
-            {/* Economies of scale indicator strip */}
-            <div className="bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800/80 p-3 rounded-lg flex items-center justify-between text-xs shadow-sm">
-              <span className="text-slate-600 dark:text-slate-400 flex items-center gap-1.5 font-medium">
-                <ArrowDownRight className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                Unit cost progression:
+          {/* Volume Scale Price Comparison Table (Horizontal Scrollable) */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs uppercase tracking-widest text-blue-600 dark:text-blue-400 font-black">
+                Economies of Scale Matrix
               </span>
-              <div className="flex items-center gap-4 font-mono text-xs">
-                <span className="text-slate-500">500 units: ~{formatNgn(currentPkg.base500)}/ea</span>
-                <span className="text-blue-700 dark:text-blue-400 font-bold">➔ At {quantity.toLocaleString()}: {formatNgn(finalUnitPriceNgn)}/ea</span>
-              </div>
+              <span className="text-xs text-slate-500">Unit cost breakdown</span>
+            </div>
+            <div className="w-full overflow-x-auto border-2 border-black dark:border-zinc-800">
+              <table className="w-full min-w-max text-left text-xs font-mono">
+                <thead className="bg-slate-100 dark:bg-zinc-900 text-slate-700 dark:text-zinc-300 uppercase text-[10px] border-b border-black dark:border-zinc-800">
+                  <tr>
+                    <th className="p-2.5">Tier Volume</th>
+                    <th className="p-2.5 text-center">Unit Price (₦)</th>
+                    <th className="p-2.5 text-center">Discount</th>
+                    <th className="p-2.5 text-right">Batch Total</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-zinc-900 text-slate-800 dark:text-zinc-200">
+                  {[500, 2500, 10000, 25000, 50000].map(vol => {
+                    const unitPrice = calculateTierUnit(vol);
+                    const isCurrentTier = (quantity >= vol * 0.7 && quantity <= vol * 1.3) || (vol === 50000 && quantity > 35000);
+                    const disc = Math.round((1 - unitPrice / calculateTierUnit(500)) * 100);
+                    return (
+                      <tr key={vol} className={isCurrentTier ? 'bg-blue-50 dark:bg-blue-950/40 font-bold' : ''}>
+                        <td className="p-2.5 tabular-nums">
+                          {vol.toLocaleString()} units
+                          {isCurrentTier && <span className="ml-2 text-[10px] text-blue-600 dark:text-blue-400 uppercase font-black">← Active</span>}
+                        </td>
+                        <td className="p-2.5 text-center font-bold tabular-nums text-blue-700 dark:text-blue-400">
+                          {formatNgn(unitPrice)}
+                        </td>
+                        <td className="p-2.5 text-center tabular-nums text-emerald-600 font-bold">
+                          {disc > 0 ? `-${disc}%` : 'Base'}
+                        </td>
+                        <td className="p-2.5 text-right tabular-nums font-mono">
+                          {formatNgn(unitPrice * vol + currentPkg.plateFee)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           </div>
 
-          {/* Substrate GSM & Finishing Selector */}
+          {/* Step 3: Specialty Finishes & GSM */}
           <div>
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-mono text-blue-700 dark:text-blue-400 uppercase tracking-widest font-bold">
-                03 // Premium Embellishments & Coatings
+            <div className="flex items-center justify-between mb-3 border-b border-black/10 dark:border-zinc-800 pb-2">
+              <span className="text-xs uppercase tracking-widest text-blue-600 dark:text-blue-400 font-black">
+                03 // Premium Finishes & Embellishments
               </span>
-              <span className="text-xs text-slate-500 dark:text-slate-400">Multi-select finishing options</span>
+              <span className="text-xs text-slate-500 dark:text-zinc-400">Select multiple options</span>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               {Object.entries(finishCatalog).map(([key, fin]) => {
-                const isChecked = selectedFinishes.includes(key);
+                const active = selectedFinishes.includes(key);
                 return (
                   <button
                     key={key}
                     type="button"
                     onClick={() => toggleFinish(key)}
-                    className={`p-3 rounded-xl border text-left transition-all ${
-                      isChecked
-                        ? 'bg-blue-50 border-blue-500 text-slate-900 dark:bg-blue-950/30 dark:border-blue-500/70 dark:text-slate-100 shadow-sm'
-                        : 'bg-slate-50 dark:bg-slate-950/50 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-700'
+                    className={`min-h-[44px] p-3 border-2 text-left transition-all cursor-pointer ${
+                      active
+                        ? 'bg-blue-600 text-white border-black font-bold shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]'
+                        : 'bg-slate-50 dark:bg-zinc-900 border-slate-300 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 hover:border-black dark:hover:border-zinc-600'
                     }`}
                   >
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-slate-900 dark:text-slate-200">{fin.name}</span>
-                      <span className="text-[10px] font-mono text-blue-700 dark:text-blue-400 font-bold">+{Math.round(fin.costFactor * 100)}%</span>
+                      <span className="text-xs font-black uppercase">{fin.name}</span>
+                      <span className="text-[10px] font-mono font-bold bg-black text-white px-1.5 py-0.5">+{Math.round(fin.costFactor * 100)}%</span>
                     </div>
-                    <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">{fin.desc}</p>
+                    <p className="text-[11px] opacity-80 mt-1 font-sans">{fin.desc}</p>
                   </button>
                 );
               })}
             </div>
           </div>
 
-          {/* Automated Artwork Pre-Flight Checker */}
-          <div className="pt-2 border-t border-slate-200 dark:border-slate-800 space-y-3">
+          {/* Step 4: Automated Artwork Pre-Flight Checker */}
+          <div className="border-2 border-black dark:border-zinc-800 p-4 bg-slate-50 dark:bg-zinc-900 space-y-3">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-mono text-blue-700 dark:text-blue-400 uppercase tracking-widest font-bold flex items-center gap-2">
-                <FileCheck2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                04 // Automated Artwork Pre-Flight
+              <span className="text-xs uppercase tracking-widest text-blue-600 dark:text-blue-400 font-black flex items-center gap-2">
+                <FileCheck className="w-4 h-4 text-emerald-600" />
+                04 // CTP Pre-Flight Artwork Verification
               </span>
-              <span className="text-xs text-slate-500 dark:text-slate-400">AI / PDF / EPS Validator</span>
+              <span className="text-xs text-slate-500">CMYK 300 DPI</span>
             </div>
 
-            <div className="bg-slate-50 dark:bg-slate-950/60 border border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-4 text-center hover:border-blue-500/50 transition-colors">
-              {preflightStatus === 'idle' && (
-                <div className="space-y-2">
-                  <UploadCloud className="w-8 h-8 text-slate-400 mx-auto" />
-                  <div>
-                    <label className="text-xs text-blue-700 dark:text-blue-400 font-semibold cursor-pointer hover:underline">
-                      Upload Print-Ready Vector PDF / AI
-                      <input 
-                        type="file" 
-                        accept=".pdf,.ai,.eps" 
-                        className="hidden" 
-                        onChange={handleSimulatePreflight} 
-                      />
-                    </label>
-                    <p className="text-[10px] text-slate-500 mt-0.5">
-                      Or click here to test automated 300DPI, CMYK & 3mm Bleed Pre-Flight simulation.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => handleSimulatePreflight({})}
-                    className="text-[11px] bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 px-3 py-1 rounded border border-slate-200 dark:border-slate-700 transition-colors shadow-sm"
-                  >
-                    Simulate Pre-Flight File Check
-                  </button>
-                </div>
-              )}
+            <div className="flex flex-col sm:flex-row items-center gap-3">
+              <label className="min-h-[44px] flex-1 w-full bg-white dark:bg-black border-2 border-dashed border-black dark:border-zinc-700 p-3 text-center cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-900 transition-colors flex items-center justify-center gap-2">
+                <UploadCloud className="w-4 h-4 text-blue-600" />
+                <span className="text-xs font-bold uppercase">{uploadedFileName || 'Upload .AI / .PDF / .EPS Vector File'}</span>
+                <input type="file" accept=".pdf,.ai,.eps,.cdr" onChange={handlePreflightUpload} className="hidden" />
+              </label>
 
               {preflightStatus === 'checking' && (
-                <div className="py-4 space-y-2">
-                  <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto" />
-                  <p className="text-xs text-slate-700 dark:text-slate-300 font-mono">Running pre-flight raster & vector analysis...</p>
-                </div>
+                <span className="text-xs font-bold text-amber-600 animate-pulse">Analyzing color profiles...</span>
               )}
 
               {preflightStatus === 'verified' && (
-                <div className="space-y-2 text-left bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-300 dark:border-emerald-500/30 p-3 rounded-lg shadow-sm">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5">
-                      <Check className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                      Pre-Flight Passed: {uploadedFileName || 'brand-packaging-die-cut.pdf'}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setPreflightStatus('idle')}
-                      className="text-[10px] text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 underline font-mono"
-                    >
-                      Reset File
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 text-[10px] font-mono text-emerald-900 dark:text-slate-300 pt-1">
-                    <span className="text-emerald-700 dark:text-emerald-400">✓ Color Profile: Fogra39 CMYK</span>
-                    <span className="text-emerald-700 dark:text-emerald-400">✓ Resolution: 300 DPI Verified</span>
-                    <span className="text-emerald-700 dark:text-emerald-400">✓ Exterior Bleed: 3.0mm Included</span>
-                    <span className="text-emerald-700 dark:text-emerald-400">✓ Fonts: Outlined & Embedded</span>
-                  </div>
+                <div className="bg-emerald-100 dark:bg-emerald-950 border border-emerald-500 px-3 py-2 text-xs font-bold text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5">
+                  <Check className="w-4 h-4 text-emerald-600" />
+                  <span>3mm Bleed & CMYK Verified</span>
                 </div>
               )}
             </div>
@@ -461,148 +510,173 @@ Generated via ${company.name} Automated Packaging Volume Engine. Requesting prin
 
         </div>
 
-        {/* Right Column: Volume Quote Summary & Sample Checkout (5 cols) */}
+        {/* Right Column: Commercial Summary & WhatsApp Dispatch (5 cols) */}
         <div className="lg:col-span-5 space-y-4">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-xl dark:shadow-2xl relative transition-colors duration-200">
+          <div className="bg-white dark:bg-zinc-950 border-2 border-black dark:border-zinc-800 p-6 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,0.1)] relative">
             
             <div className="space-y-5">
               
               {/* Header */}
-              <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800">
+              <div className="flex items-center justify-between pb-3 border-b-2 border-black dark:border-zinc-800">
                 <div>
-                  <span className="text-[10px] font-mono uppercase tracking-widest text-blue-700 dark:text-blue-400 font-bold">Turnkey Commercial Quote</span>
-                  <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                    {company.name} Packaging Run
+                  <span className="text-xs uppercase tracking-widest text-blue-600 dark:text-blue-400 font-black">
+                    Packaging Production Order
+                  </span>
+                  <h3 className="text-lg font-black uppercase text-slate-900 dark:text-white">
+                    {company.name} Quote
                   </h3>
                 </div>
-                <span className="text-xs font-mono bg-blue-50 dark:bg-slate-950 border border-blue-200 dark:border-slate-800 px-2.5 py-1 rounded-lg text-blue-700 dark:text-blue-400 font-bold">
+                <span className="text-xs font-mono bg-black text-blue-400 px-3 py-1 font-black">
                   {quantity.toLocaleString()} Pcs
                 </span>
               </div>
 
-              {/* Volume Savings Callout */}
-              <div className="bg-blue-50/70 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-500/30 rounded-xl p-3 text-xs text-blue-900 dark:text-blue-300 flex items-center justify-between">
-                <div>
-                  <span className="block font-semibold">Bulk Production Efficiency</span>
-                  <span className="text-[11px] text-slate-500 dark:text-slate-400">Saved vs. low-volume baseline</span>
+              {/* Volume Savings Banner */}
+              {volumeSavingsPct > 0 && (
+                <div className="bg-emerald-100 dark:bg-emerald-950/60 border-2 border-emerald-600 p-3 text-xs text-emerald-900 dark:text-emerald-300 flex items-center justify-between font-bold">
+                  <div className="flex items-center gap-2">
+                    <TrendingDown className="w-4 h-4 text-emerald-700 dark:text-emerald-400 shrink-0" />
+                    <span>Scale discount active ({volumeSavingsPct}% off base unit rate).</span>
+                  </div>
+                  <strong className="font-mono tabular-nums text-emerald-900 dark:text-emerald-200">
+                    Saved {formatNgn(volumeSavingsNgn)}
+                  </strong>
                 </div>
-                <div className="text-right font-mono">
-                  <span className="text-emerald-700 dark:text-emerald-400 font-bold block">-{volumeSavingsPct}% Discount</span>
-                  <span className="text-[10px] text-slate-500 dark:text-slate-400">{formatNgn(volumeSavingsNgn)} Saved</span>
-                </div>
-              </div>
+              )}
 
               {/* Price Breakdown */}
               <div className="space-y-3 text-sm">
-                <div className="flex justify-between items-center text-slate-700 dark:text-slate-300">
+                <div className="flex justify-between items-center text-slate-700 dark:text-zinc-300">
                   <div>
-                    <span className="text-xs text-slate-500 dark:text-slate-400 block">Unit Cost at {quantity.toLocaleString()} Pcs</span>
-                    <span className="text-[11px] text-slate-400 dark:text-slate-500">Includes substrate & selected finishes</span>
+                    <span className="text-xs text-slate-500 block">Unit Cost @ {quantity.toLocaleString()} Pcs</span>
+                    <span className="text-[11px] text-slate-400 font-sans">{selectedFinishes.length} Finishes Included</span>
                   </div>
-                  <span className="font-mono font-bold text-blue-700 dark:text-blue-400 text-base tabular-nums">
+                  <span className="font-mono font-bold text-blue-600 dark:text-blue-400 text-base tabular-nums">
                     {formatNgn(finalUnitPriceNgn)} <span className="text-xs text-slate-500 font-normal">/ unit</span>
                   </span>
                 </div>
 
-                <div className="flex justify-between items-center text-slate-700 dark:text-slate-300">
+                <div className="flex justify-between items-center text-slate-700 dark:text-zinc-300">
                   <div>
-                    <span className="text-xs text-slate-500 dark:text-slate-400 block">Bulk Production Subtotal</span>
-                    <span className="text-[11px] text-slate-400 dark:text-slate-500">{quantity.toLocaleString()} x {formatNgn(finalUnitPriceNgn)}</span>
+                    <span className="text-xs text-slate-500 block">Bulk Production Subtotal</span>
+                    <span className="text-[11px] text-slate-400 font-sans">{quantity.toLocaleString()} x {formatNgn(finalUnitPriceNgn)}</span>
                   </div>
-                  <span className="font-mono font-medium tabular-nums text-slate-900 dark:text-slate-100">{formatNgn(totalProductionNgn)}</span>
+                  <span className="font-mono font-bold tabular-nums text-slate-900 dark:text-white">{formatNgn(totalProductionNgn)}</span>
                 </div>
 
-                <div className="flex justify-between items-center text-slate-700 dark:text-slate-300">
+                <div className="flex justify-between items-center text-slate-700 dark:text-zinc-300">
                   <div>
-                    <span className="text-xs text-slate-500 dark:text-slate-400 block">CTP Aluminum Plates & Die-Tooling</span>
-                    <span className="text-[11px] text-slate-400 dark:text-slate-500">One-time setup fee (waived on re-orders)</span>
+                    <span className="text-xs text-slate-500 block">CTP Plates & Laser Cutting Dies</span>
+                    <span className="text-[11px] text-slate-400 font-sans">One-time tooling fee</span>
                   </div>
-                  <span className="font-mono font-medium tabular-nums text-slate-900 dark:text-slate-100">{formatNgn(currentPkg.plateFee)}</span>
+                  <span className="font-mono font-bold tabular-nums text-slate-900 dark:text-white">{formatNgn(currentPkg.plateFee)}</span>
                 </div>
 
                 {sampleKitOrdered && (
-                  <div className="flex justify-between items-center text-amber-700 dark:text-amber-300 pt-1 border-t border-slate-200 dark:border-slate-800/60">
+                  <div className="flex justify-between items-center text-amber-700 dark:text-amber-400 pt-1 border-t border-slate-200 dark:border-zinc-800">
                     <div>
-                      <span className="text-xs block font-semibold">Prototype Sample Proof Pack</span>
-                      <span className="text-[11px] text-slate-500 dark:text-slate-400">100% credited against bulk order invoice</span>
+                      <span className="text-xs font-bold block">Prototype Sample Proof Pack</span>
+                      <span className="text-[11px] text-slate-400 font-sans">Credited on bulk order</span>
                     </div>
-                    <span className="font-mono font-medium tabular-nums">{formatNgn(custom.sampleKitNgn || 15000)}</span>
+                    <span className="font-mono font-bold tabular-nums">{formatNgn(custom.sampleKitNgn || 15000)}</span>
                   </div>
                 )}
               </div>
 
-              {/* Total Card */}
-              <div className="bg-slate-50 dark:bg-slate-950 border-2 border-blue-500/40 rounded-xl p-4 space-y-1 shadow-sm">
-                <span className="text-[11px] font-mono text-blue-700 dark:text-blue-400 uppercase tracking-wider block font-bold">
+              {/* Total Order Card */}
+              <div className="bg-slate-50 dark:bg-black border-2 border-black dark:border-blue-500 p-4 space-y-1">
+                <span className="text-xs uppercase tracking-wider font-bold text-blue-600 dark:text-blue-400 block">
                   Total Production Order Value
                 </span>
-                <div className="text-2xl font-black text-slate-900 dark:text-white font-mono tabular-nums tracking-tight">
+                <div className="text-3xl font-black text-slate-900 dark:text-white font-mono tabular-nums tracking-tight">
                   {formatNgn(totalOrderNgn + (sampleKitOrdered ? (custom.sampleKitNgn || 15000) : 0))}
                 </div>
-                <p className="text-[10px] text-slate-500 pt-1">
+                <p className="text-[10px] text-slate-500 pt-1 font-sans">
                   *Delivery within {custom.leadTimeDays || 7} working days upon CTP pre-flight sign-off.
                 </p>
               </div>
 
-              {/* Action Buttons */}
+              {/* Action Buttons (All min-h-[44px]) */}
               <div className="space-y-2 pt-2">
                 <a
                   href={whatsappUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-2 text-sm shadow-lg shadow-emerald-950/20 dark:shadow-emerald-950/40 transition-all group"
+                  className="w-full min-h-[48px] bg-emerald-600 hover:bg-emerald-500 text-white font-black py-3 px-4 flex items-center justify-center gap-2 text-xs uppercase tracking-wider transition-all shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] active:translate-y-0.5"
                 >
-                  <Send className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
+                  <Send className="w-4 h-4" />
                   <span>Dispatch Quote via WhatsApp</span>
                   <ExternalLink className="w-3.5 h-3.5 opacity-70 ml-1" />
                 </a>
 
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <button
                     type="button"
                     onClick={() => setIsWhatsAppSimOpen(true)}
-                    className="bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-semibold py-2.5 px-3 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-center gap-1.5 transition-colors shadow-sm"
+                    className="min-h-[44px] bg-slate-100 hover:bg-slate-200 dark:bg-zinc-900 dark:hover:bg-zinc-800 text-slate-900 dark:text-white text-xs font-bold py-2.5 px-3 border border-black dark:border-zinc-700 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
                   >
-                    <Smartphone className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                    <Smartphone className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                     <span>WhatsApp Simulator</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setIsInvoiceOpen(true)}
-                    className="bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-semibold py-2.5 px-3 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-center gap-1.5 transition-colors shadow-sm"
+                    className="min-h-[44px] bg-slate-100 hover:bg-slate-200 dark:bg-zinc-900 dark:hover:bg-zinc-800 text-slate-900 dark:text-white text-xs font-bold py-2.5 px-3 border border-black dark:border-zinc-700 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
                   >
-                    <Printer className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                    <Printer className="w-4 h-4 text-blue-600 dark:text-blue-400" />
                     <span>Proforma PDF</span>
                   </button>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={handleCopy}
-                  className="w-full bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-mono text-xs py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 border border-slate-200 dark:border-slate-700 transition-colors shadow-sm"
-                >
-                  {copied ? (
-                    <>
-                      <Check className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                      <span className="text-emerald-700 dark:text-emerald-400 font-semibold">Packaging Spec Copied!</span>
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="w-4 h-4 text-slate-500 dark:text-slate-400" />
-                      <span>Copy Turnkey Packaging Spec</span>
-                    </>
-                  )}
-                </button>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={handleCopyShareLink}
+                    className="min-h-[44px] bg-slate-100 hover:bg-slate-200 dark:bg-zinc-900 dark:hover:bg-zinc-800 text-slate-900 dark:text-white font-mono text-xs font-bold py-2.5 px-3 border border-black dark:border-zinc-700 flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                  >
+                    {copiedLink ? (
+                      <>
+                        <Check className="w-4 h-4 text-emerald-600" />
+                        <span className="text-emerald-700 dark:text-emerald-400">Link Copied!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Link2 className="w-4 h-4 text-slate-600 dark:text-zinc-400" />
+                        <span>Copy Quote Link</span>
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleCopy}
+                    className="min-h-[44px] bg-slate-100 hover:bg-slate-200 dark:bg-zinc-900 dark:hover:bg-zinc-800 text-slate-900 dark:text-white font-mono text-xs font-bold py-2.5 px-3 border border-black dark:border-zinc-700 flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                  >
+                    {copied ? (
+                      <>
+                        <Check className="w-4 h-4 text-emerald-600" />
+                        <span className="text-emerald-700 dark:text-emerald-400">Spec Copied!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-4 h-4 text-slate-600 dark:text-zinc-400" />
+                        <span>Copy Raw Spec</span>
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
 
               {/* Desk Information Footer */}
-              <div className="pt-3 border-t border-slate-200 dark:border-slate-800/80 text-[11px] text-slate-500 flex items-center justify-between">
+              <div className="pt-3 border-t border-black/10 dark:border-zinc-800 text-xs text-slate-500 flex items-center justify-between">
                 <span className="flex items-center gap-1.5">
-                  <MapPin className="w-3 h-3 text-slate-400" />
+                  <MapPin className="w-3.5 h-3.5 text-slate-400" />
                   {company.location}
                 </span>
-                <span className="font-mono text-blue-700 dark:text-blue-400/80 font-medium">Automated CTP Proofing</span>
+                <span className="font-mono text-blue-600 dark:text-blue-400 font-bold uppercase">
+                  Automated CTP Proofing
+                </span>
               </div>
 
             </div>
