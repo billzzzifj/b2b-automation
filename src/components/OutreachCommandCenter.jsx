@@ -24,7 +24,8 @@ import {
   ArrowUpRight,
   RefreshCw,
   Building2,
-  DollarSign
+  DollarSign,
+  MapPin
 } from 'lucide-react';
 import { LAGOS_TARGETS_50, SECTORS } from '../data/lagosTargets50';
 import { generateOutreachPack, getDemoUrl } from '../data/outreachDispatcher';
